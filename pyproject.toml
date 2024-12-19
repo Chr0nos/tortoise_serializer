@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "tortoise-serializer"
+version = "1.0.0"
+description = "Pydantic serialization for tortoise-orm"
+authors = ["Sebastien Nicolet <snicolet95@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+tortoise-orm = "^0.22.1"
+pydantic = "^2.10.3"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
