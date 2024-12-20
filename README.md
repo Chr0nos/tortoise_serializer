@@ -63,7 +63,7 @@ class MyUserCreationSerializer(Serializer):
 
 @router.post("")
 async def create_user(user_serializer: MyUserCreationSerializer = Body(...)) -> MyUserSerializer:
-    user = await user_serializer.create_tortoise_instance()
+    user = await user_serializer.create_tortoise_instance(MyUser)
     # here you can also pass `context=` to that function
     return await MyUserSerializer.from_tortoise_orm(user)
 ```
