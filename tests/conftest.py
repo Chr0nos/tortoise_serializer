@@ -4,10 +4,6 @@ from tortoise import Tortoise
 
 @pytest.fixture(scope="session")
 def tortoise_config():
-    """
-    Provide the Tortoise ORM configuration for tests.
-    Update the 'models' key with the paths to your app's models.
-    """
     return {
         "connections": {
             "default": "sqlite://:memory:"  # Using in-memory SQLite for testing
