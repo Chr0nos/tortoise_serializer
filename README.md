@@ -15,7 +15,7 @@ pip add tortoise-serializer
 
 ## Core concept
 A `Serializer` does not need to know which model it will serialize. For example:
-```python=
+```python
 from tortoise_serializer import Serializer
 
 
@@ -63,7 +63,7 @@ async def get_users() -> list[MyUserSerializer]:
 (Note: You can specify a `context` to pass additional information to serializers, but it is not mandatory.)
 
 ### Writing
-```python=
+```python
 from fastapi import Body
 from pydantic import Field
 
@@ -89,7 +89,7 @@ The context in serializers is immutable.
 ### Resolvers
 Sometimes, you need to compute values or restrict access to sensitive data. This can be achieved with `resolvers` and `context`. Here's an example:
 
-```python=
+```python
 from tortoise_serializer import ContextType, Serializer, require_permission_or_unset
 from tortoise import Model, fields
 
@@ -130,7 +130,7 @@ Async resolvers are called concurrently during serializer instantiation.
 ### ForeignKeys & OneToOne
 To serialize relations, declare a field in the serializer as another serializer:
 
-```python=
+```python
 from tortoise import Model, fields
 from tortoise_serializer import Serializer
 
@@ -187,7 +187,7 @@ Reverse relations are `list[Serializer]`
 
 Limitations:
 Limitations: You cannot declare a field like this:
-```python=
+```python
 class SerializerA(Serializer):
     ...
 
@@ -201,7 +201,7 @@ class MyWrongSerializer(Serializer):
 ```
 
 but you can still use `None` like:
-```python=
+```python
 class MySerializer(Serializer):
     some_relation: SerializerA | None = None
 ```
@@ -221,7 +221,7 @@ Serialization involves resolving fields in the following order:
 This order allows hiding fields based on the request.
 
 Example of a computed field:
-```python=
+```python
 from pydantic import Field
 from tortoise_serializer import Serializer, ContextType
 from tortoise.queryset import QuerySet
