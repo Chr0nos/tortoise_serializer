@@ -1,4 +1,4 @@
 tests:
-	poetry run pytest --asyncio-mode=auto
+	poetry run pytest --asyncio-mode=auto --cov tortoise_serializer
 
 .PHONY: tests
