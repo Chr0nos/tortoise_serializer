@@ -10,10 +10,7 @@ def tortoise_config():
         },
         "apps": {
             "models": {
-                "models": [
-                    "tests.models",
-                    # "aerich.models",
-                ],  # Replace with your actual models
+                "models": ["tests.models"],
                 "default_connection": "default",
             },
         },
