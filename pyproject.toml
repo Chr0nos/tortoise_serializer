@@ -1,17 +1,17 @@
 [tool.poetry]
 name = "tortoise-serializer"
-version = "1.0.1"
+version = "1.0.2"
 description = "Pydantic serialization for tortoise-orm"
 authors = ["Sebastien Nicolet <snicolet95@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.12"
-tortoise-orm = "^0.22.1"
+python = "^3.11"
 pydantic = "^2.10.3"
 frozendict = "^2.4.6"
 structlog = "^24.4.0"
+tortoise-orm = "^0.23.0"
 
 
 [tool.poetry.group.dev.dependencies]
