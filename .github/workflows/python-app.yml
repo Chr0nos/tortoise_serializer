@@ -30,4 +30,4 @@ jobs:
         poetry install
     - name: Test with pytest
       run: |
-        poetry run pytest
+        poetry run pytest --asyncio-mode=auto --cov tortoise_serializer
