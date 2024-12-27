@@ -1,6 +1,6 @@
 import asyncio
 
-from tests.models import Book, BookShelf
+from tests.models import Book, BookShelf, Person
 from tortoise_serializer import Serializer
 
 
@@ -110,3 +110,29 @@ async def test_from_queryset():
         ("LOTR", "Harry Potter", "The Great Gatsby")
     ):
         assert serializers[index].title == title
+
+
+async def test_many_to_many_serializers():
+    books = [
+        await Book.create(title="LOTR"),
+        await Book.create(title="Harry Potter"),
+        await Book.create(title="The Great Gatsby"),
+    ]
+    alice = await Person.create(name="Alice")
+
+    await alice.borrows.add(*books)
+
+    class BookSerializer(Serializer):
+        id: int
+        title: str
+
+    class PersonSerializer(Serializer):
+        id: int
+        name: str
+        borrows: list[BookSerializer]
+
+    assert await alice.borrows.all().count() == 3
+    serializer = await PersonSerializer.from_tortoise_orm(alice)
+    assert serializer.id == alice.id
+    assert serializer.name == alice.name
+    assert len(serializer.borrows) == len(books)
