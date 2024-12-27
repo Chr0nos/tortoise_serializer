@@ -1,7 +1,7 @@
 import asyncio
 
 from tests.models import Book, BookShelf, Person
-from tortoise_serializer import Serializer
+from tortoise_serializer import ContextType, Serializer
 
 
 async def test_book_serialization():
@@ -149,3 +149,22 @@ async def test_many_to_many_serializers():
     assert serializer.id == alice.id
     assert serializer.name == alice.name
     assert len(serializer.borrows) == len(books)
+
+
+async def test_resolver_simple():
+    class BookSerializer(Serializer):
+        title: str
+        price_per_page: float | None
+
+        @classmethod
+        def resolve_price_per_page(
+            cls, instance: Book, context: ContextType
+        ) -> float | None:
+            try:
+                return instance.price / instance.page_count
+            except (ZeroDivisionError, TypeError, ValueError):
+                return None
+
+    book = await Book.create(title="Test", price=10, page_count=200)
+    serializer = await BookSerializer.from_tortoise_orm(book)
+    assert serializer.price_per_page == 0.05

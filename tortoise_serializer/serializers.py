@@ -14,7 +14,6 @@ from tortoise import Model, fields
 from tortoise.fields.relational import ManyToManyRelation, _NoneAwaitable
 from tortoise.queryset import QuerySet
 
-
 MODEL = TypeVar("MODEL", bound=Model)
 T = TypeVar("T")
 ContextType = frozendict[str, Any]

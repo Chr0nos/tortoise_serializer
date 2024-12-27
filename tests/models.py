@@ -11,6 +11,8 @@ class Book(Model):
         null=True,
         related_name="books",
     )
+    page_count = fields.IntField(null=True, default=None)
+    price = fields.FloatField(null=True, default=None)
 
 
 class BookShelf(Model):
