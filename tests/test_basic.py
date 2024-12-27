@@ -32,6 +32,19 @@ async def test_foreignkey_serialization():
     assert book.shelf.name == serializer.shelf.name
 
 
+async def test_foreignkey_none():
+    class ShelfSerializer(Serializer):
+        name: str
+
+    class BookSerializer(Serializer):
+        title: str
+        shelf: ShelfSerializer | None
+
+    book = await Book.create(title="test title", shelf=None)
+    serializer = await BookSerializer.from_tortoise_orm(book)
+    assert serializer.shelf is None
+
+
 async def test_backward_fk_serialization():
     class BookSerializer(Serializer):
         id: int
