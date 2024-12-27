@@ -1,4 +1,7 @@
 import asyncio
+from typing import Any
+
+import pytest
 
 from tests.models import Book, BookShelf, Person
 from tortoise_serializer import ContextType, Serializer
@@ -168,3 +171,37 @@ async def test_resolver_simple():
     book = await Book.create(title="Test", price=10, page_count=200)
     serializer = await BookSerializer.from_tortoise_orm(book)
     assert serializer.price_per_page == 0.05
+
+
+@pytest.mark.parametrize("value", [None, "", "some valid title"])
+async def test_has_been_set(value: Any):
+    class BookSerializer(Serializer):
+        title: str | None = None
+
+    serializer = BookSerializer(title=value)
+    assert serializer.has_been_set("title") is True
+
+
+async def test_has_not_been_set():
+    class BookSerializer(Serializer):
+        title: str | None = None
+
+    serializer = BookSerializer()
+    assert serializer.has_been_set("title") is False
+
+
+async def test_foreignkey_auto_fetch():
+    class ShelfSerializer(Serializer):
+        name: str
+
+    class BookSerializer(Serializer):
+        title: str
+        shelf: ShelfSerializer
+
+    await Book.create(
+        title="LOTR", shelf=await BookShelf.create(name="Testing")
+    )
+
+    book = await Book.get(title="LOTR")
+    serializer = await BookSerializer.from_tortoise_orm(book)
+    assert serializer.shelf.name == "Testing"
