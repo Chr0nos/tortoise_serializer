@@ -256,3 +256,32 @@ async def test_nested_context_preservation():
         person, context={"person": person}
     )
     assert serializer.borrows[0].has_been_borrowed is True
+
+
+async def test_prefech_fields_simple():
+    class BookSerializer(Serializer):
+        title: str
+
+    class ShelfSerializer(Serializer):
+        id: int
+        name: str
+        books: list[BookSerializer]
+
+    assert ShelfSerializer.get_prefetch_fields() == ["books"]
+
+
+async def test_prefetch_nested():
+    class SerializerA(Serializer):
+        id: int
+
+    class SerializerB(Serializer):
+        id: int
+        a: SerializerA | None
+
+    class SerializerC(Serializer):
+        id: int
+        b: SerializerB
+
+    assert SerializerC._is_nested_serializer("b")
+    assert SerializerB._is_nested_serializer("a")
+    assert SerializerC.get_prefetch_fields() == ["b", "b__a"]

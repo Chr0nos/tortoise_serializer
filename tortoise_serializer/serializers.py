@@ -5,7 +5,7 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache, wraps
 from inspect import iscoroutinefunction
-from typing import Any, Self, Sequence, Type, TypeVar, get_args
+from typing import Any, Generator, Self, Sequence, Type, TypeVar, get_args
 
 from frozendict import frozendict
 from pydantic import BaseModel, ValidationError
@@ -358,28 +358,55 @@ class Serializer(BaseModel):
         return data
 
     @classmethod
-    @lru_cache()
     def _is_nested_serializer(cls, field_name: str) -> bool:
-        try:
-            item = cls.model_fields[field_name].annotation
-            if not item:
-                return False
-            return issubclass(item, Serializer)
-        except (TypeError, KeyError):
+        """
+        Check if the given field name corresponds to a nested serializer.
+        """
+        # Ensure the field exists in the annotations
+        if field_name not in cls.__annotations__:
             return False
+
+        # Get the type annotation for the field
+        field_type = cls.__annotations__[field_name]
+
+        # Check if the field type corresponds to a nested serializer
+        args = get_args(field_type)
+        if args:
+            return any(
+                isinstance(arg, type) and issubclass(arg, Serializer)
+                for arg in args
+            )
+        return isinstance(field_type, type) and issubclass(
+            field_type, Serializer
+        )
 
     @classmethod
     def _get_nested_serializers_for_field(
         cls, field_name: str
     ) -> list["Serializer"]:
+        """
+        Get a list of nested serializers for the given field, if any.
+        """
         try:
-            return list(
-                filter(
-                    lambda item: issubclass(item, Serializer),
-                    get_args(cls.model_fields[field_name].annotation),
+            field_annotation = cls.model_fields[field_name].annotation
+            args = get_args(field_annotation)
+
+            # Return all nested serializers from the field's type hints
+            return (
+                [
+                    arg
+                    for arg in args
+                    if isinstance(arg, type) and issubclass(arg, Serializer)
+                ]
+                if args
+                else (
+                    [field_annotation]
+                    if isinstance(field_annotation, type)
+                    and issubclass(field_annotation, Serializer)
+                    else []
                 )
             )
-        except TypeError:
+        except (KeyError, TypeError):
             return []
 
     @classmethod
@@ -467,3 +494,40 @@ class Serializer(BaseModel):
         """Return True if `field_name` has been set, otherwise False"""
         data = self.model_dump(include={field_name}, exclude_unset=True)
         return field_name in data
+
+    @classmethod
+    def get_prefetch_fields_generator(
+        cls, prefix: str = ""
+    ) -> Generator[str, None, None]:
+        """
+        Generate prefetch fields for all nested serializers.
+        """
+        if prefix:
+            prefix = prefix + "__"
+
+        for field_name in cls.model_fields.keys():
+            field_serializers = cls._get_nested_serializers_for_field(
+                field_name
+            )
+
+            # If no nested serializers are found, skip this field
+            if not field_serializers:
+                continue
+
+            # Field is a nested serializer
+            yield prefix + field_name
+
+            # Recursively get prefetch fields from nested serializers
+            for nested_serializer in field_serializers:
+                yield from nested_serializer.get_prefetch_fields(
+                    prefix + field_name
+                )
+
+    @classmethod
+    def get_prefetch_fields(cls, prefix: str = "") -> list[str]:
+        """
+        Generate prefetch fields for all nested serializers.
+        The concept is to pass the output of that function to
+        `Model.fetch_related()` or `QuerySet[Model].prefech_related()`
+        """
+        return list(cls.get_prefetch_fields_generator(prefix))
