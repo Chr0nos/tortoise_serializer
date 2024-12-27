@@ -205,3 +205,24 @@ async def test_foreignkey_auto_fetch():
     book = await Book.get(title="LOTR")
     serializer = await BookSerializer.from_tortoise_orm(book)
     assert serializer.shelf.name == "Testing"
+
+
+async def test_resolving_priority():
+    class BookSerializer(Serializer):
+        price: float
+
+        @classmethod
+        def resolve_price(cls, instance: Book, context: ContextType):
+            return instance.price * 2
+
+        @classmethod
+        def resolve_shelf(cls, instance: Book, context: ContextType):
+            return None
+
+    book = await Book.create(
+        title="Foo",
+        price=10,
+        shelf=await BookShelf.create(name="Something"),
+    )
+    serializer = await BookSerializer.from_tortoise_orm(book)
+    assert serializer.price == 20
