@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from enum import Enum
@@ -13,6 +14,8 @@ from structlog import get_logger
 from tortoise import Model, fields
 from tortoise.fields.relational import ManyToManyRelation, _NoneAwaitable
 from tortoise.queryset import QuerySet
+
+from .exceptions import TortoiseSerializerClassMethodException
 
 MODEL = TypeVar("MODEL", bound=Model)
 T = TypeVar("T")
@@ -321,6 +324,11 @@ class Serializer(BaseModel):
         data = {}
         async with asyncio.TaskGroup() as tg:
             for field_name, field_resolver in computed_fields.items():
+                if not inspect.ismethod(field_resolver):
+                    raise TortoiseSerializerClassMethodException(
+                        cls, field_name
+                    )
+
                 # ignore any nested serializers, it will be a job for the
                 # foreign key resolver
                 if isinstance(

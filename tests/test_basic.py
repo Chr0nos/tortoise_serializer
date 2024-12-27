@@ -226,3 +226,33 @@ async def test_resolving_priority():
     )
     serializer = await BookSerializer.from_tortoise_orm(book)
     assert serializer.price == 20
+
+
+async def test_nested_context_preservation():
+    class BookSerializer(Serializer):
+        title: str
+        has_been_borrowed: bool
+
+        @classmethod
+        async def resolve_has_been_borrowed(
+            cls, instance: Book, context: ContextType
+        ):
+            return (
+                await context["person"]
+                .borrows.filter(title=instance.title)
+                .exists()
+            )
+
+    class PersonSerializer(Serializer):
+        id: int
+        name: str
+        borrows: list[BookSerializer]
+
+    person = await Person.create(name="Xena")
+    book = await Book.create(title="Dogts are better than cats")
+    await person.borrows.add(book)
+
+    serializer = await PersonSerializer.from_tortoise_orm(
+        person, context={"person": person}
+    )
+    assert serializer.borrows[0].has_been_borrowed is True
