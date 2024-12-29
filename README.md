@@ -267,3 +267,51 @@ assert serializer.answer_to_the_question == 42
 ```
 
 All async resolvers will be resolved in concurency in a `asyncio.gather`, non-async ones will be resolved one after the other
+
+## Model Serializers
+Sometime it may be usefull or necessary to be able to create a row and it's related foreignkeys at once in one endpoint, to achieve that the `ModelSerializer` class exists:
+```python
+from tortoise import Model, fields
+from tortoise_serializer import ModelSerializer
+
+
+class Book(Model):
+    id = fields.IntField(primary_key=True)
+    title = fields.CharField(db_index=True, max_length=200)
+    shelf = fields.ForeignKeyField(
+        "models.BookShelf",
+        on_delete=fields.SET_NULL,
+        null=True,
+        related_name="books",
+    )
+
+class BookShelf(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(unique=True, max_length=200)
+    books: BackwardFKRelation[Book]
+
+
+class ShelfCreationSerializer(ModelSerializer):
+    name: str
+
+    class Meta:
+        model = BookShelf
+
+
+class BookCreationSerializer(ModelSerializer):
+    title: str
+    # here ofc it's a bit weird to create the shelves with the books but
+    # it's only for the example
+    shelf: ShelfCreationSerializer
+
+    class Meta:
+        model = Book
+
+
+serializer = BookCreationSerializer(title="Some Title", shelv={"name": "where examples lie"})
+example = await serializer.create_tortoise_instance()
+
+# example will be an instance of `Book` here with it's related `shelf` realtion
+
+assert await Book.filter(name="Some Title", shelv__name="where examples lie").exists()
+```
