@@ -15,7 +15,10 @@ from tortoise import Model, fields
 from tortoise.fields.relational import ManyToManyRelation, _NoneAwaitable
 from tortoise.queryset import QuerySet
 
-from .exceptions import TortoiseSerializerClassMethodException
+from .exceptions import (
+    TortoiseSerializerClassMethodException,
+    TortoiseSerializerException,
+)
 
 MODEL = TypeVar("MODEL", bound=Model)
 T = TypeVar("T")
@@ -531,3 +534,39 @@ class Serializer(BaseModel):
         `Model.fetch_related()` or `QuerySet[Model].prefech_related()`
         """
         return list(cls.get_prefetch_fields_generator(prefix))
+
+
+class ModelSerializer(Serializer):
+    class Meta:
+        model = MODEL
+
+    async def create_tortoise_instance(self, _exclude=None, **kwargs) -> MODEL:
+        """Creates the tortoise instance of this serialzer and it's nested relations.
+        it's highly recommended to use this inside a a `transaction` context
+        """
+        creation_kwargs = {}
+        exclude = set()
+        for field_name, serializers in self._get_nested_serializers().items():
+            serializer_class = serializers[0]
+            if not issubclass(serializer_class, ModelSerializer):
+                raise TortoiseSerializerException(
+                    f"Bad configuration for field {field_name}:"
+                    " this must inherit from ModelSerializer"
+                )
+            serialized_value = getattr(self, field_name)
+            serializer = serializer_class.model_validate(serialized_value)
+            instance = await serializer.create_tortoise_instance(
+                **kwargs.get(field_name, {})
+            )
+
+            # no need to keep the serializer instance in the context: we instead
+            # will use the `id` only
+            creation_kwargs[field_name + "_id"] = instance.id
+            exclude.add(field_name)
+
+        merged_kwargs = creation_kwargs | kwargs
+        if _exclude:
+            exclude += set(_exclude)
+        return await super().create_tortoise_instance(
+            self.Meta.model, exclude, **merged_kwargs
+        )
