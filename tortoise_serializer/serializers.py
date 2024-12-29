@@ -5,7 +5,16 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache, wraps
 from inspect import iscoroutinefunction
-from typing import Any, Generator, Self, Sequence, Type, TypeVar, get_args
+from typing import (
+    Any,
+    Generator,
+    Self,
+    Sequence,
+    Type,
+    TypeVar,
+    get_args,
+    override,
+)
 
 from frozendict import frozendict
 from pydantic import BaseModel, ValidationError
@@ -540,6 +549,7 @@ class ModelSerializer(Serializer):
     class Meta:
         model = MODEL
 
+    @override
     async def create_tortoise_instance(self, _exclude=None, **kwargs) -> MODEL:
         """Creates the tortoise instance of this serialzer and it's nested relations.
         it's highly recommended to use this inside a a `transaction` context
