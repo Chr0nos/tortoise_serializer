@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 pydantic = "^2.10.3"
 frozendict = "^2.4.6"
 structlog = "^24.4.0"
