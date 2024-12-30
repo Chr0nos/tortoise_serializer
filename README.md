@@ -315,3 +315,8 @@ example = await serializer.create_tortoise_instance()
 
 assert await Book.filter(name="Some Title", shelv__name="where examples lie").exists()
 ```
+
+Models serializer can manage:
+- [x] Foreign keys
+- [x] Backward foreign key
+- [x] Many2Many relations

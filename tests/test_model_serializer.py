@@ -111,3 +111,5 @@ async def test_model_backward_fk_creation():
     )
     shelf = await serializer.create_tortoise_instance()
     assert await shelf.books.all().count() == 2
+    assert await Book.filter(title="LOTR", shelf__name="fantastic").exists()
+    assert Book.filter(title="LOTR", shelf__name="fantastic").exists()
