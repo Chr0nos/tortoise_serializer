@@ -1,6 +1,6 @@
 from tortoise.transactions import in_transaction
 
-from tests.models import Book, BookShelf
+from tests.models import Book, BookShelf, Person
 from tortoise_serializer import ModelSerializer
 
 
@@ -52,3 +52,62 @@ async def test_model_creation_without_relation():
     book = await serializer.create_tortoise_instance()
     assert book.id
     assert not book.shelf
+
+
+async def test_model_m2m_creation():
+    class BookSerializer(ModelSerializer):
+        title: str
+        price: float | None = None
+        page_count: int | None = None
+
+        class Meta:
+            model = Book
+
+    class PersonSerializer(ModelSerializer):
+        name: str
+        borrows: list[BookSerializer]
+
+        class Meta:
+            model = Person
+
+    serializer = PersonSerializer(
+        name="Louise",
+        borrows=[
+            BookSerializer(title="Harry Potter", price=30, page_count=300),
+            BookSerializer(
+                title="To Kill a Mockingbird", price=20, page_count=288
+            ),
+            BookSerializer(title="1984", price=14, page_count=328),
+        ],
+    )
+    async with in_transaction():
+        person = await serializer.create_tortoise_instance()
+
+    assert await person.borrows.all().count() == 3
+
+
+async def test_model_backward_fk_creation():
+    class BookSerializer(ModelSerializer):
+        title: str
+        price: float | None = None
+        page_count: int | None = None
+
+        class Meta:
+            model = Book
+
+    class ShelfSerializer(ModelSerializer):
+        name: str
+        books: list[BookSerializer]
+
+        class Meta:
+            model = BookShelf
+
+    serializer = ShelfSerializer(
+        name="fantastic",
+        books=[
+            BookSerializer(title="Harry Potter", price=30, page_count=300),
+            BookSerializer(title="LOTR", price=40, pages_count=200),
+        ],
+    )
+    shelf = await serializer.create_tortoise_instance()
+    assert await shelf.books.all().count() == 2

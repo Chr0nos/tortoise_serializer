@@ -12,7 +12,13 @@ from pydantic import BaseModel, ValidationError
 from pydantic.main import IncEx
 from structlog import get_logger
 from tortoise import Model, fields
-from tortoise.fields.relational import ManyToManyRelation, _NoneAwaitable
+from tortoise.fields.relational import (
+    BackwardFKRelation,
+    ForeignKeyFieldInstance,
+    ManyToManyFieldInstance,
+    ManyToManyRelation,
+    _NoneAwaitable,
+)
 from tortoise.queryset import QuerySet
 
 from .exceptions import (
@@ -537,6 +543,8 @@ class ModelSerializer(Serializer):
 
         creation_kwargs = {}
         exclude = set()
+        many_to_manys: dict[str, list[Model]] = {}
+        backward_fks: dict[str, list[ModelSerializer]] = {}
 
         # as tempting as it might be, don't try to put that into a concurent
         # task like asyncio.gather: here we are probably in a transaction
@@ -554,19 +562,64 @@ class ModelSerializer(Serializer):
                     f"Bad configuration for field {field_name}:"
                     " this must inherit from ModelSerializer"
                 )
-            serializer = serializer_class.model_validate(serialized_value)
-            instance = await serializer.create_tortoise_instance(
-                **kwargs.get(field_name, {})
-            )
+            relation = self.Meta.model._meta.fields_map[field_name]
+            if isinstance(relation, ManyToManyFieldInstance):
+                for serializer in [
+                    serializer_class.model_validate(item)
+                    for item in serialized_value
+                ]:
+                    instance = await serializer.create_tortoise_instance(
+                        **kwargs.get(field_name, {})
+                    )
+                    many_to_manys[field_name] = many_to_manys.get(
+                        field_name, []
+                    ) + [instance]
+                    exclude.add(field_name)
 
-            # no need to keep the serializer instance in the context: we instead
-            # will use the `id` only
-            creation_kwargs[field_name + "_id"] = instance.id
-            exclude.add(field_name)
+            # backward foreign keys
+            elif isinstance(relation, BackwardFKRelation):
+                for serializer in [
+                    serializer_class.model_validate(item)
+                    for item in serialized_value
+                ]:
+                    backward_fks[field_name] = backward_fks.get(
+                        field_name, []
+                    ) + [serializer]
+                exclude.add(field_name)
+
+            elif isinstance(relation, ForeignKeyFieldInstance):
+                serializer = serializer_class.model_validate(serialized_value)
+                instance = await serializer.create_tortoise_instance(
+                    **kwargs.get(field_name, {})
+                )
+
+                # no need to keep the serializer instance in the context: we instead
+                # will use the `id` only
+                creation_kwargs[field_name + "_id"] = instance.id
+                exclude.add(field_name)
 
         merged_kwargs = creation_kwargs | kwargs
         if _exclude:
             exclude += set(_exclude)
-        return await super().create_tortoise_instance(
+        instance = await super().create_tortoise_instance(
             self.Meta.model, exclude, **merged_kwargs
         )
+        for field_name, instances in many_to_manys.items():
+            await getattr(instance, field_name).add(*instances)
+
+        await self._create_backward_fks(instance, backward_fks)
+        return instance
+
+    async def _create_backward_fks(
+        self, instance: MODEL, backward_fks: dict[str, list[Self]], **kwargs
+    ) -> None:
+        """Creates the backward ForeignKeys for a given instance (of self.Meta.model)"""
+        for field_name, serializers in backward_fks.items():
+            field: fields.ReverseRelation = self.Meta.model._meta.fields_map[
+                field_name
+            ]
+            backward_key = field.relation_field
+            for serializer in serializers:
+                await serializer.create_tortoise_instance(
+                    **{backward_key: instance.id}
+                )
