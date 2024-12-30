@@ -623,3 +623,49 @@ class ModelSerializer(Serializer):
                 await serializer.create_tortoise_instance(
                     **{backward_key: instance.id}
                 )
+
+    @classmethod
+    def get_model_fields(
+        cls, prefix: str | None = None, max_depth: int = 3
+    ) -> set[str]:
+        """Return the set of fields that are common to the model and this serializer,
+        including nested serializer fields up to the specified max_depth.
+
+        Args:
+            prefix (str | None): A string prefix to prepend to nested fields.
+            max_depth (int): Maximum depth for nested field exploration.
+
+        Returns:
+            Set[str]: A set of field names including nested fields, with prefixes applied.
+        """
+        model_fields: set[str] = set(cls.Meta.model._meta.fields)
+        serializer_fields: set[str] = set(cls.model_fields.keys())
+        common_fields = model_fields.intersection(serializer_fields)
+
+        # Prepare prefix if not provided
+        prefix = prefix or ""
+
+        if max_depth > 0:
+            for field_name in common_fields.copy():
+                # Get nested serializers for this field
+                serializers = cls._get_nested_serializers_for_field(field_name)
+                if not serializers:
+                    continue
+
+                serializer_class = serializers[0]
+                if not issubclass(serializer_class, ModelSerializer):
+                    raise TortoiseSerializerException(
+                        f"Bad configuration for field {field_name}:"
+                        f" this must inherit from ModelSerializer ({serializer_class})"
+                    )
+
+                # Recursive call to get nested fields
+                nested_fields = serializer_class.get_model_fields(
+                    prefix=f"{prefix}{field_name}__",
+                    max_depth=max_depth - 1,
+                )
+                # Merge nested fields into the common fields
+                common_fields.update(nested_fields)
+
+        # Add prefix to all fields
+        return {f"{prefix}{field}" for field in common_fields}

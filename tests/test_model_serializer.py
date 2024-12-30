@@ -109,7 +109,38 @@ async def test_model_backward_fk_creation():
             BookSerializer(title="LOTR", price=40, pages_count=200),
         ],
     )
-    shelf = await serializer.create_tortoise_instance()
+    async with in_transaction():
+        shelf = await serializer.create_tortoise_instance()
     assert await shelf.books.all().count() == 2
     assert await Book.filter(title="LOTR", shelf__name="fantastic").exists()
     assert Book.filter(title="LOTR", shelf__name="fantastic").exists()
+
+
+async def test_get_model_fields():
+    class ShelfSerializer(ModelSerializer):
+        id: int
+        name: str
+
+        class Meta:
+            model = BookShelf
+
+    class BookSerializer(ModelSerializer):
+        id: int
+        title: str
+        price: float | None = None
+        page_count: int | None = None
+        shelf: ShelfSerializer
+        ignore_me: str
+
+        class Meta:
+            model = Book
+
+    assert BookSerializer.get_model_fields() == {
+        "id",
+        "title",
+        "price",
+        "page_count",
+        "shelf",
+        "shelf__id",
+        "shelf__name",
+    }
