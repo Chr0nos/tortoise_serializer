@@ -28,27 +28,11 @@ from .exceptions import (
     TortoiseSerializerClassMethodException,
     TortoiseSerializerException,
 )
-
-MODEL = TypeVar("MODEL", bound=Model)
-T = TypeVar("T")
-ContextType = frozendict[str, Any]
+from .types import MODEL, ContextType, T, Unset, UnsetType
 
 logger = get_logger()
 log_level = logging.INFO
 logging.getLogger(__name__).setLevel(log_level)
-
-
-class Unset:
-    """
-    Describe an unset field. This field will be omitted from the Pydantic model validation when
-    instantiating the model.
-
-    They are intented to be used in resolvers for `Serializer` to not set anything
-    and be able to use `exclude_unset=True`
-    """
-
-
-UnsetType = Type[Unset]
 
 
 def require_permission_or_unset(
@@ -562,6 +546,10 @@ class ModelSerializer(Serializer):
 
         creation_kwargs = {}
         exclude = set()
+
+        # as tempting as it might be, don't try to put that into a concurent
+        # task like asyncio.gather: here we are probably in a transaction
+        # context and tortoise will complain if we have 2 concurent operations
         for field_name, serializers in self._get_nested_serializers().items():
             serialized_value = getattr(self, field_name)
 
