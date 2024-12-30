@@ -32,3 +32,23 @@ async def test_model_creation():
     assert BookShelf.filter(name="fantastic").exists()
     assert BookShelf.filter(name="LOTR").exists()
     assert await Book.filter(title="LOTR", shelf__name="fantastic").exists()
+
+
+async def test_model_creation_without_relation():
+    class ShelfSerializer(ModelSerializer):
+        name: str
+
+        class Meta:
+            model = BookShelf
+
+    class BookSerializer(ModelSerializer):
+        title: str
+        shelf: ShelfSerializer | None = None
+
+        class Meta:
+            model = Book
+
+    serializer = BookSerializer(title="test")
+    book = await serializer.create_tortoise_instance()
+    assert book.id
+    assert not book.shelf

@@ -554,16 +554,27 @@ class ModelSerializer(Serializer):
         """Creates the tortoise instance of this serialzer and it's nested relations.
         it's highly recommended to use this inside a a `transaction` context
         """
+        if not hasattr(self.Meta, "model") or self.Meta.model is MODEL:
+            raise TortoiseSerializerException(
+                f"Bad configuration for {self} serializer"
+                ": missing class.Meta.model definition"
+            )
+
         creation_kwargs = {}
         exclude = set()
         for field_name, serializers in self._get_nested_serializers().items():
+            serialized_value = getattr(self, field_name)
+
+            # allow nones to be passed if the model allow them
+            if serialized_value is None:
+                continue
+
             serializer_class = serializers[0]
             if not issubclass(serializer_class, ModelSerializer):
                 raise TortoiseSerializerException(
                     f"Bad configuration for field {field_name}:"
                     " this must inherit from ModelSerializer"
                 )
-            serialized_value = getattr(self, field_name)
             serializer = serializer_class.model_validate(serialized_value)
             instance = await serializer.create_tortoise_instance(
                 **kwargs.get(field_name, {})
