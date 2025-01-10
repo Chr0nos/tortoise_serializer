@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tortoise-serializer"
-version = "1.1.0"
+version = "1.1.1"
 description = "Pydantic serialization for tortoise-orm"
 authors = ["Sebastien Nicolet <snicolet95@gmail.com>"]
 license = "MIT"
@@ -21,6 +21,7 @@ anyio = "^4.7.0"
 pytest-asyncio = "^0.25.0"
 ruff = "^0.8.4"
 pytest-cov = "^6.0.0"
+coverage = "^7.6.10"
 
 [build-system]
 requires = ["poetry-core"]
