@@ -1,4 +1,7 @@
 # Tortoise Serializer
+
+[![Codacy Badge](https://api.codacy.com/project/badge/Grade/78714f3efbf8418daa5880dd7dc7661f)](https://app.codacy.com/gh/Chr0nos/tortoise_serializer?utm_source=github.com&utm_medium=referral&utm_content=Chr0nos/tortoise_serializer&utm_campaign=Badge_Grade)
+
 ## Motivation
 This project was created to address some of the limitations of `pydantic_model_creator`, including:
 - The ability to use a `context` in serialization at the field level.
