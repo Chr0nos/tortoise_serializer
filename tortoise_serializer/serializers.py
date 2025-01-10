@@ -669,3 +669,56 @@ class ModelSerializer(Serializer):
 
         # Add prefix to all fields
         return {f"{prefix}{field}" for field in common_fields}
+
+    def filter_queryset(self, queryset: QuerySet[MODEL]) -> QuerySet[MODEL]:
+        """Filter the queryset based on the serializer fields.
+        This method is called after the serializer has been validated.
+
+        Args:
+            queryset (QuerySet[MODEL]): The queryset to be filtered.
+
+        Returns:
+            QuerySet[MODEL]: The filtered queryset.
+        """
+        return queryset.filter(**{k: v for k, v in self._get_filters()})
+
+    def _get_filters(
+        self, prefix: str | None = None, suffix: str | None = None
+    ) -> Generator[tuple[str, Any]]:
+        """
+        Generate filters for the queryset based on the serializer fields.
+
+        Parameters:
+        - prefix (str | None): A string prefix to prepend to nested fields.
+        - suffix (str | None): A string suffix to append to nested fields.
+
+        Yields:
+        - Generator[tuple[str, Any]]: A generator of tuples containing
+          field names and their corresponding values.
+
+        Raises:
+        - TortoiseSerializerException: If a nested serializer does not inherit from ModelSerializer.
+        """
+        prefix = prefix or ""
+        suffix = suffix or ""
+        for field_name in self.get_model_fields(prefix, max_depth=0):
+            serializers = self._get_nested_serializers_for_field(field_name)
+            if serializers:
+                relation = self.Meta.model._meta.fields_map[field_name]
+                if isinstance(relation, BackwardFKRelation):
+                    continue
+
+                elif isinstance(relation, ForeignKeyFieldInstance):
+                    serializer = serializers[0]
+                    if not isinstance(serializer, ModelSerializer):
+                        raise TortoiseSerializerException(
+                            f"Bad configuration for field {field_name}:"
+                            f" this must inherit from ModelSerializer ({serializer})"
+                        )
+                    yield from serializer._get_filters(
+                        f"{prefix}{field_name}__"
+                    )
+
+            else:
+                field_value = getattr(self, field_name)
+                yield (f"{prefix}{field_name}{suffix}", field_value)
