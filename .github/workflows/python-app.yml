@@ -32,3 +32,8 @@ jobs:
     - name: Test with pytest
       run: |
         poetry run pytest --asyncio-mode=auto --cov tortoise_serializer
+    - name: Upload coverage report
+      env:
+        CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
+      run: |
+        bash <(curl -Ls https://coverage.codacy.com/get.sh)
