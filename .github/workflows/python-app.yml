@@ -32,10 +32,9 @@ jobs:
         poetry run ruff check tortoise_serializer
     - name: Test with pytest
       run: |
-        poetry run pytest --asyncio-mode=auto --cov tortoise_serializer
-        poetry run coverage report
+        poetry run pytest --asyncio-mode=auto --cov --cov-report=json tortoise_serializer --cov-report=json
     - name: Upload coverage report
       env:
         CODACY_PROJECT_TOKEN: ${{ secrets.CODACY_PROJECT_TOKEN }}
       run: |
-        bash <(curl -Ls https://coverage.codacy.com/get.sh) report -r .coverage
+        bash <(curl -Ls https://coverage.codacy.com/get.sh) report
