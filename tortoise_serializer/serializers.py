@@ -5,38 +5,31 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache, wraps
 from inspect import iscoroutinefunction
-from typing import Any, Generator, Self, Sequence, Type, TypeVar, get_args
+from typing import Any, Generator, Self, Sequence, Type, get_args, override
 
 from frozendict import frozendict
 from pydantic import BaseModel, ValidationError
 from pydantic.main import IncEx
 from structlog import get_logger
 from tortoise import Model, fields
-from tortoise.fields.relational import ManyToManyRelation, _NoneAwaitable
+from tortoise.fields.relational import (
+    BackwardFKRelation,
+    ForeignKeyFieldInstance,
+    ManyToManyFieldInstance,
+    ManyToManyRelation,
+    _NoneAwaitable,
+)
 from tortoise.queryset import QuerySet
 
-from .exceptions import TortoiseSerializerClassMethodException
-
-MODEL = TypeVar("MODEL", bound=Model)
-T = TypeVar("T")
-ContextType = frozendict[str, Any]
+from .exceptions import (
+    TortoiseSerializerClassMethodException,
+    TortoiseSerializerException,
+)
+from .types import MODEL, ContextType, T, Unset, UnsetType
 
 logger = get_logger()
 log_level = logging.INFO
 logging.getLogger(__name__).setLevel(log_level)
-
-
-class Unset:
-    """
-    Describe an unset field. This field will be omitted from the Pydantic model validation when
-    instantiating the model.
-
-    They are intented to be used in resolvers for `Serializer` to not set anything
-    and be able to use `exclude_unset=True`
-    """
-
-
-UnsetType = Type[Unset]
 
 
 def require_permission_or_unset(
@@ -531,3 +524,148 @@ class Serializer(BaseModel):
         `Model.fetch_related()` or `QuerySet[Model].prefech_related()`
         """
         return list(cls.get_prefetch_fields_generator(prefix))
+
+
+class ModelSerializer(Serializer):
+    class Meta:
+        model = MODEL
+
+    @override
+    async def create_tortoise_instance(self, _exclude=None, **kwargs) -> MODEL:
+        """Creates the tortoise instance of this serialzer and it's nested relations.
+        it's highly recommended to use this inside a a `transaction` context
+        """
+        if not hasattr(self.Meta, "model") or self.Meta.model is MODEL:
+            raise TortoiseSerializerException(
+                f"Bad configuration for {self} serializer"
+                ": missing class.Meta.model definition"
+            )
+
+        creation_kwargs = {}
+        exclude = set()
+        many_to_manys: dict[str, list[Model]] = {}
+        backward_fks: dict[str, list[ModelSerializer]] = {}
+
+        # as tempting as it might be, don't try to put that into a concurent
+        # task like asyncio.gather: here we are probably in a transaction
+        # context and tortoise will complain if we have 2 concurent operations
+        for field_name, serializers in self._get_nested_serializers().items():
+            serialized_value = getattr(self, field_name)
+
+            # allow nones to be passed if the model allow them
+            if serialized_value is None:
+                continue
+
+            serializer_class = serializers[0]
+            if not issubclass(serializer_class, ModelSerializer):
+                raise TortoiseSerializerException(
+                    f"Bad configuration for field {field_name}:"
+                    " this must inherit from ModelSerializer"
+                )
+            relation = self.Meta.model._meta.fields_map[field_name]
+            if isinstance(relation, ManyToManyFieldInstance):
+                for serializer in [
+                    serializer_class.model_validate(item)
+                    for item in serialized_value
+                ]:
+                    instance = await serializer.create_tortoise_instance(
+                        **kwargs.get(field_name, {})
+                    )
+                    many_to_manys[field_name] = many_to_manys.get(
+                        field_name, []
+                    ) + [instance]
+                    exclude.add(field_name)
+
+            # backward foreign keys
+            elif isinstance(relation, BackwardFKRelation):
+                for serializer in [
+                    serializer_class.model_validate(item)
+                    for item in serialized_value
+                ]:
+                    backward_fks[field_name] = backward_fks.get(
+                        field_name, []
+                    ) + [serializer]
+                exclude.add(field_name)
+
+            elif isinstance(relation, ForeignKeyFieldInstance):
+                serializer = serializer_class.model_validate(serialized_value)
+                instance = await serializer.create_tortoise_instance(
+                    **kwargs.get(field_name, {})
+                )
+
+                # no need to keep the serializer instance in the context: we instead
+                # will use the `id` only
+                creation_kwargs[field_name + "_id"] = instance.id
+                exclude.add(field_name)
+
+        merged_kwargs = creation_kwargs | kwargs
+        if _exclude:
+            exclude += set(_exclude)
+        instance = await super().create_tortoise_instance(
+            self.Meta.model, exclude, **merged_kwargs
+        )
+        for field_name, instances in many_to_manys.items():
+            await getattr(instance, field_name).add(*instances)
+
+        await self._create_backward_fks(instance, backward_fks)
+        return instance
+
+    async def _create_backward_fks(
+        self, instance: MODEL, backward_fks: dict[str, list[Self]], **kwargs
+    ) -> None:
+        """Creates the backward ForeignKeys for a given instance (of self.Meta.model)"""
+        for field_name, serializers in backward_fks.items():
+            field: fields.ReverseRelation = self.Meta.model._meta.fields_map[
+                field_name
+            ]
+            backward_key = field.relation_field
+            for serializer in serializers:
+                await serializer.create_tortoise_instance(
+                    **{backward_key: instance.id}
+                )
+
+    @classmethod
+    def get_model_fields(
+        cls, prefix: str | None = None, max_depth: int = 3
+    ) -> set[str]:
+        """Return the set of fields that are common to the model and this serializer,
+        including nested serializer fields up to the specified max_depth.
+
+        Args:
+            prefix (str | None): A string prefix to prepend to nested fields.
+            max_depth (int): Maximum depth for nested field exploration.
+
+        Returns:
+            Set[str]: A set of field names including nested fields, with prefixes applied.
+        """
+        model_fields: set[str] = set(cls.Meta.model._meta.fields)
+        serializer_fields: set[str] = set(cls.model_fields.keys())
+        common_fields = model_fields.intersection(serializer_fields)
+
+        # Prepare prefix if not provided
+        prefix = prefix or ""
+
+        if max_depth > 0:
+            for field_name in common_fields.copy():
+                # Get nested serializers for this field
+                serializers = cls._get_nested_serializers_for_field(field_name)
+                if not serializers:
+                    continue
+
+                serializer_class = serializers[0]
+                if not issubclass(serializer_class, ModelSerializer):
+                    raise TortoiseSerializerException(
+                        f"Bad configuration for field {field_name}:"
+                        f" this must inherit from ModelSerializer ({serializer_class})"
+                    )
+
+                # Recursive call to get nested fields
+                nested_fields = serializer_class.get_model_fields(
+                    prefix=f"{prefix}{field_name}__",
+                    max_depth=max_depth - 1,
+                )
+                # Merge nested fields into the common fields
+                common_fields.update(nested_fields)
+
+        # Add prefix to all fields
+        return {f"{prefix}{field}" for field in common_fields}
