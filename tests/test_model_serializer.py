@@ -144,3 +144,24 @@ async def test_get_model_fields():
         "shelf__id",
         "shelf__name",
     }
+
+
+def test_get_filters():
+    class BookSerializer(ModelSerializer):
+        id: int
+
+        class Meta:
+            model = Book
+
+    class ShelfSerializer(ModelSerializer):
+        name: str
+        books: list[BookSerializer]
+
+        class Meta:
+            model = BookShelf
+
+    serializer = ShelfSerializer(
+        name="Test", books=[BookSerializer(id=1), BookSerializer(id=2)]
+    )
+    filters_dict = dict({k: v for k, v in serializer._get_filters()})
+    assert filters_dict == {"name": "Test"}
