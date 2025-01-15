@@ -11,5 +11,6 @@ __all__ = [
     "Serializer",
     "ModelSerializer",
     "Unset",
+    "UnsetType",
     "require_permission_or_unset",
 ]
