@@ -3,7 +3,7 @@ from .serializers import (
     Serializer,
     require_permission_or_unset,
 )
-from .types import ContextType, Unset
+from .types import ContextType, Unset, UnsetType
 
 __all__ = [
     "ContextType",
