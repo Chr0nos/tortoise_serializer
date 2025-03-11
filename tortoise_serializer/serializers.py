@@ -478,6 +478,7 @@ class Serializer(BaseModel):
         self,
         model: Type[MODEL],
         _exclude: IncEx | None = None,
+        _context: ContextType | None = None,
         **kwargs,
     ) -> MODEL:
         model_data = self.model_dump(exclude=_exclude)
@@ -527,24 +528,27 @@ class Serializer(BaseModel):
 
 
 class ModelSerializer(Serializer):
-    class Meta:
-        model = MODEL
-
-    @override
-    async def create_tortoise_instance(self, _exclude=None, **kwargs) -> MODEL:
-        """Creates the tortoise instance of this serialzer and it's nested relations.
-        it's highly recommended to use this inside a a `transaction` context
-        """
-        if not hasattr(self.Meta, "model") or self.Meta.model is MODEL:
+    @classmethod
+    def get_model_class(cls) -> MODEL:
+        if not hasattr(cls.Meta, "model") or cls.Meta.model is MODEL:
             raise TortoiseSerializerException(
-                f"Bad configuration for {self} serializer"
+                f"Bad configuration for {cls} serializer"
                 ": missing class.Meta.model definition"
             )
+        return cls.Meta.model
 
+    @override
+    async def create_tortoise_instance(
+        self, _exclude=None, _context: ContextType | None = None, **kwargs
+    ) -> MODEL:
+        """Creates the tortoise instance of this serializer and it's nested relations.
+        it's highly recommended to use this inside a a `transaction` context
+        """
         creation_kwargs = {}
         exclude = set()
         many_to_manys: dict[str, list[Model]] = {}
         backward_fks: dict[str, list[ModelSerializer]] = {}
+        fw_relations_instances: dict[str, list[ModelSerializer]] = {}
 
         # as tempting as it might be, don't try to put that into a concurent
         # task like asyncio.gather: here we are probably in a transaction
@@ -562,14 +566,15 @@ class ModelSerializer(Serializer):
                     f"Bad configuration for field {field_name}:"
                     " this must inherit from ModelSerializer"
                 )
-            relation = self.Meta.model._meta.fields_map[field_name]
+            relation = self.get_model_class()._meta.fields_map[field_name]
             if isinstance(relation, ManyToManyFieldInstance):
                 for serializer in [
                     serializer_class.model_validate(item)
                     for item in serialized_value
                 ]:
                     instance = await serializer.create_tortoise_instance(
-                        **kwargs.get(field_name, {})
+                        **kwargs.get(field_name, {}),
+                        _context=_context,
                     )
                     many_to_manys[field_name] = many_to_manys.get(
                         field_name, []
@@ -589,39 +594,54 @@ class ModelSerializer(Serializer):
 
             elif isinstance(relation, ForeignKeyFieldInstance):
                 serializer = serializer_class.model_validate(serialized_value)
-                instance = await serializer.create_tortoise_instance(
-                    **kwargs.get(field_name, {})
+                relation_instance = await serializer.create_tortoise_instance(
+                    **kwargs.get(field_name, {}),
+                    _context=_context,
                 )
 
                 # no need to keep the serializer instance in the context: we instead
                 # will use the `id` only
-                creation_kwargs[field_name + "_id"] = instance.id
+                creation_kwargs[field_name + "_id"] = relation_instance.id
                 exclude.add(field_name)
+
+                # keep the relation instance to set it later in the object
+                fw_relations_instances[field_name] = relation_instance
 
         merged_kwargs = creation_kwargs | kwargs
         if _exclude:
             exclude += set(_exclude)
         instance = await super().create_tortoise_instance(
-            self.Meta.model, exclude, **merged_kwargs
+            self.get_model_class(),
+            _exclude=exclude,
+            _context=_context,
+            **merged_kwargs,
         )
         for field_name, instances in many_to_manys.items():
             await getattr(instance, field_name).add(*instances)
 
-        await self._create_backward_fks(instance, backward_fks)
+        # Set forward foreign key in the current instance
+        for field_name, instance in fw_relations_instances.items():
+            setattr(instance, field_name, instance)
+
+        await self._create_backward_fks(instance, backward_fks, _context)
         return instance
 
     async def _create_backward_fks(
-        self, instance: MODEL, backward_fks: dict[str, list[Self]], **kwargs
+        self,
+        instance: MODEL,
+        backward_fks: dict[str, list[Self]],
+        _context: ContextType | None,
     ) -> None:
-        """Creates the backward ForeignKeys for a given instance (of self.Meta.model)"""
+        """Creates the backward ForeignKeys for a given instance of self.get_model_class"""
         for field_name, serializers in backward_fks.items():
-            field: fields.ReverseRelation = self.Meta.model._meta.fields_map[
-                field_name
-            ]
+            field: fields.ReverseRelation = (
+                self.get_model_class()._meta.fields_map[field_name]
+            )
             backward_key = field.relation_field
             for serializer in serializers:
                 await serializer.create_tortoise_instance(
-                    **{backward_key: instance.id}
+                    _context=_context,
+                    **{backward_key: instance.id},
                 )
 
     @classmethod
