@@ -21,6 +21,11 @@ class BookShelf(Model):
     books: BackwardFKRelation[Book]
 
 
+class Location(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+
+
 class Person(Model):
     id = fields.IntField(primary_key=True)
     name = fields.CharField(max_length=200)
@@ -29,3 +34,4 @@ class Person(Model):
         through="borrow",
         related_name="borrowers",
     )
+    location = fields.OneToOneField("models.Location", null=True, default=None)
