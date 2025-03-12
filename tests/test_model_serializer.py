@@ -1,22 +1,16 @@
 from tortoise.transactions import in_transaction
 
-from tests.models import Book, BookShelf, Person
+from tests.models import Book, BookShelf, Location, Person
 from tortoise_serializer import ModelSerializer
 
 
 async def test_model_creation():
-    class ShelfSerializer(ModelSerializer):
+    class ShelfSerializer(ModelSerializer[BookShelf]):
         name: str
 
-        class Meta:
-            model = BookShelf
-
-    class BookSerializer(ModelSerializer):
+    class BookSerializer(ModelSerializer[Book]):
         title: str
         shelf: ShelfSerializer
-
-        class Meta:
-            model = Book
 
     serializer = BookSerializer(
         title="LOTR",
@@ -35,18 +29,12 @@ async def test_model_creation():
 
 
 async def test_model_creation_without_relation():
-    class ShelfSerializer(ModelSerializer):
+    class ShelfSerializer(ModelSerializer[BookShelf]):
         name: str
 
-        class Meta:
-            model = BookShelf
-
-    class BookSerializer(ModelSerializer):
+    class BookSerializer(ModelSerializer[Book]):
         title: str
         shelf: ShelfSerializer | None = None
-
-        class Meta:
-            model = Book
 
     serializer = BookSerializer(title="test")
     book = await serializer.create_tortoise_instance()
@@ -55,20 +43,14 @@ async def test_model_creation_without_relation():
 
 
 async def test_model_m2m_creation():
-    class BookSerializer(ModelSerializer):
+    class BookSerializer(ModelSerializer[Book]):
         title: str
         price: float | None = None
         page_count: int | None = None
 
-        class Meta:
-            model = Book
-
-    class PersonSerializer(ModelSerializer):
+    class PersonSerializer(ModelSerializer[Person]):
         name: str
         borrows: list[BookSerializer]
-
-        class Meta:
-            model = Person
 
     serializer = PersonSerializer(
         name="Louise",
@@ -87,20 +69,14 @@ async def test_model_m2m_creation():
 
 
 async def test_model_backward_fk_creation():
-    class BookSerializer(ModelSerializer):
+    class BookSerializer(ModelSerializer[Book]):
         title: str
         price: float | None = None
         page_count: int | None = None
 
-        class Meta:
-            model = Book
-
-    class ShelfSerializer(ModelSerializer):
+    class ShelfSerializer(ModelSerializer[BookShelf]):
         name: str
         books: list[BookSerializer]
-
-        class Meta:
-            model = BookShelf
 
     serializer = ShelfSerializer(
         name="fantastic",
@@ -117,23 +93,17 @@ async def test_model_backward_fk_creation():
 
 
 async def test_get_model_fields():
-    class ShelfSerializer(ModelSerializer):
+    class ShelfSerializer(ModelSerializer[BookShelf]):
         id: int
         name: str
 
-        class Meta:
-            model = BookShelf
-
-    class BookSerializer(ModelSerializer):
+    class BookSerializer(ModelSerializer[Book]):
         id: int
         title: str
         price: float | None = None
         page_count: int | None = None
         shelf: ShelfSerializer
         ignore_me: str
-
-        class Meta:
-            model = Book
 
     assert BookSerializer.get_model_fields() == {
         "id",
@@ -144,3 +114,26 @@ async def test_get_model_fields():
         "shelf__id",
         "shelf__name",
     }
+
+
+async def test_one_to_one():
+    person = await Person.create(
+        name="John",
+        location=await Location.create(name="Somewhere"),
+    )
+
+    class LocationSerializer(ModelSerializer[Location]):
+        id: int
+        name: str
+
+    class PersonSerializer(ModelSerializer[Person]):
+        id: int
+        name: str
+        location: LocationSerializer
+
+    serializer = await PersonSerializer.from_tortoise_orm(person)
+
+    assert serializer.id == person.id
+    assert serializer.name == person.name
+    assert serializer.location.id == person.location.id
+    assert serializer.location.name == person.location.name

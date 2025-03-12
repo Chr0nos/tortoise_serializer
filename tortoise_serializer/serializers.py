@@ -5,7 +5,16 @@ from collections.abc import Awaitable, Callable
 from enum import Enum
 from functools import lru_cache, wraps
 from inspect import iscoroutinefunction
-from typing import Any, Generator, Self, Sequence, Type, get_args, override
+from typing import (
+    Any,
+    Generator,
+    Generic,
+    Self,
+    Sequence,
+    Type,
+    get_args,
+    override,
+)
 
 from frozendict import frozendict
 from pydantic import BaseModel, ValidationError
@@ -527,15 +536,39 @@ class Serializer(BaseModel):
         return list(cls.get_prefetch_fields_generator(prefix))
 
 
-class ModelSerializer(Serializer):
+class ModelSerializer(Serializer, Generic[MODEL]):
     @classmethod
-    def get_model_class(cls) -> MODEL:
-        if not hasattr(cls.Meta, "model") or cls.Meta.model is MODEL:
-            raise TortoiseSerializerException(
-                f"Bad configuration for {cls} serializer"
-                ": missing class.Meta.model definition"
-            )
-        return cls.Meta.model
+    @lru_cache()
+    def get_model_class(cls) -> Type[MODEL]:
+        """
+        Retrieve the model class associated with the current ModelSerializer
+        subclass.
+
+        This method iterates through the class hierarchy to find the first
+        class that inherits from tortoise.models.models.BaseModel and has a
+        "__pydantic_generic_metadata__" attribute.
+        It then extracts the model class from the "args" of the
+        "__pydantic_generic_metadata__" attribute.
+
+        If no such class is found, a TortoiseSerializerException is raised.
+
+        Returns:
+            Type[MODEL]: The model class associated with the current
+                         ModelSerializer subclass.
+        """
+        for parent_class in cls.__mro__:
+            if issubclass(parent_class, BaseModel) and hasattr(
+                parent_class, "__pydantic_generic_metadata__"
+            ):
+                parent_meta = parent_class.__pydantic_generic_metadata__
+                origin = parent_meta.get("origin", None)
+                if origin:
+                    args = parent_meta.get("args", None)
+                    return args[0]
+
+        raise TortoiseSerializerException(
+            f"Bad configuration for ModelSerializer {cls}"
+        )
 
     @override
     async def create_tortoise_instance(
@@ -543,12 +576,15 @@ class ModelSerializer(Serializer):
     ) -> MODEL:
         """Creates the tortoise instance of this serializer and it's nested relations.
         it's highly recommended to use this inside a a `transaction` context
+
+        `_context` will be passed to any nested ModelSerializer as it is.
         """
         creation_kwargs = {}
         exclude = set()
         many_to_manys: dict[str, list[Model]] = {}
         backward_fks: dict[str, list[ModelSerializer]] = {}
         fw_relations_instances: dict[str, list[ModelSerializer]] = {}
+        model_class = self.get_model_class()
 
         # as tempting as it might be, don't try to put that into a concurent
         # task like asyncio.gather: here we are probably in a transaction
@@ -566,7 +602,7 @@ class ModelSerializer(Serializer):
                     f"Bad configuration for field {field_name}:"
                     " this must inherit from ModelSerializer"
                 )
-            relation = self.get_model_class()._meta.fields_map[field_name]
+            relation = model_class._meta.fields_map[field_name]
             if isinstance(relation, ManyToManyFieldInstance):
                 for serializer in [
                     serializer_class.model_validate(item)
@@ -611,7 +647,7 @@ class ModelSerializer(Serializer):
         if _exclude:
             exclude += set(_exclude)
         instance = await super().create_tortoise_instance(
-            self.get_model_class(),
+            model_class,
             _exclude=exclude,
             _context=_context,
             **merged_kwargs,
@@ -623,19 +659,23 @@ class ModelSerializer(Serializer):
         for field_name, instance in fw_relations_instances.items():
             setattr(instance, field_name, instance)
 
-        await self._create_backward_fks(instance, backward_fks, _context)
+        await self._create_backward_fks(
+            model_class, instance, backward_fks, _context
+        )
         return instance
 
     async def _create_backward_fks(
         self,
+        serializer_model_class: Type[Model],
         instance: MODEL,
         backward_fks: dict[str, list[Self]],
         _context: ContextType | None,
     ) -> None:
         """Creates the backward ForeignKeys for a given instance of self.get_model_class"""
+
         for field_name, serializers in backward_fks.items():
             field: fields.ReverseRelation = (
-                self.get_model_class()._meta.fields_map[field_name]
+                serializer_model_class._meta.fields_map[field_name]
             )
             backward_key = field.relation_field
             for serializer in serializers:
@@ -658,7 +698,7 @@ class ModelSerializer(Serializer):
         Returns:
             Set[str]: A set of field names including nested fields, with prefixes applied.
         """
-        model_fields: set[str] = set(cls.Meta.model._meta.fields)
+        model_fields: set[str] = set(cls.get_model_class()._meta.fields)
         serializer_fields: set[str] = set(cls.model_fields.keys())
         common_fields = model_fields.intersection(serializer_fields)
 

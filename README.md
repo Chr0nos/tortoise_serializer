@@ -294,21 +294,15 @@ class BookShelf(Model):
     books: BackwardFKRelation[Book]
 
 
-class ShelfCreationSerializer(ModelSerializer):
+class ShelfCreationSerializer(ModelSerializer[BookShelf]):
     name: str
 
-    class Meta:
-        model = BookShelf
 
-
-class BookCreationSerializer(ModelSerializer):
+class BookCreationSerializer(ModelSerializer[Book]):
     title: str
     # here ofc it's a bit weird to create the shelves with the books but
     # it's only for the example
     shelf: ShelfCreationSerializer
-
-    class Meta:
-        model = Book
 
 
 serializer = BookCreationSerializer(title="Some Title", shelv={"name": "where examples lie"})
@@ -323,3 +317,4 @@ Models serializer can manage:
 - [x] Foreign keys
 - [x] Backward foreign key
 - [x] Many2Many relations
+- [x] One to one relationship
