@@ -30,11 +30,11 @@ from tortoise.fields.relational import (
 )
 from tortoise.queryset import QuerySet
 
-from .exceptions import (
+from tortoise_serializer.exceptions import (
     TortoiseSerializerClassMethodException,
     TortoiseSerializerException,
 )
-from .types import MODEL, ContextType, T, Unset, UnsetType
+from tortoise_serializer.types import MODEL, ContextType, T, Unset, UnsetType
 
 logger = get_logger()
 log_level = logging.INFO
@@ -517,6 +517,12 @@ class Serializer(BaseModel):
             if not field_serializers:
                 continue
 
+            # check if the serializer need to be filterd out
+            if not cls._filter_nested_serializer(
+                field_name, field_serializers
+            ):
+                continue
+
             # Field is a nested serializer
             yield prefix + field_name
 
@@ -525,6 +531,13 @@ class Serializer(BaseModel):
                 yield from nested_serializer.get_prefetch_fields(
                     prefix + field_name
                 )
+
+    @classmethod
+    def _filter_nested_serializer(
+        cls, field_name: str, serializers: Sequence["Serializer"]
+    ) -> bool:
+        """Override to filter out serializers from the prefetch fields"""
+        return True
 
     @classmethod
     def get_prefetch_fields(cls, prefix: str = "") -> list[str]:
@@ -685,6 +698,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
                 )
 
     @classmethod
+    @lru_cache()
     def get_model_fields(
         cls, prefix: str | None = None, max_depth: int = 3
     ) -> set[str]:
@@ -729,3 +743,12 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
         # Add prefix to all fields
         return {f"{prefix}{field}" for field in common_fields}
+
+    @classmethod
+    def _filter_nested_serializer(
+        cls, field_name: str, serializers: Sequence["Serializer"]
+    ) -> bool:
+        # on ModelSerialzer we can check if the nested serializer exists
+        # in the model so we avoid to return wrong fields in the prefetch
+        # requests
+        return field_name in cls.get_model_fields()

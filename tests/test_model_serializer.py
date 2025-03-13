@@ -137,3 +137,22 @@ async def test_one_to_one():
     assert serializer.name == person.name
     assert serializer.location.id == person.location.id
     assert serializer.location.name == person.location.name
+
+
+def test_nested_serializer_get_prefetch_fields():
+    class LocationSerializer(ModelSerializer[Location]):
+        id: int
+
+    class BookSerializer(ModelSerializer[Book]):
+        id: int
+        title: str
+
+    class PersonSerializer(ModelSerializer[Person]):
+        id: int
+        name: str
+        location: LocationSerializer | None
+        books: list[BookSerializer]
+
+    # books does not exists in the `Person` model so it should not be there
+    assert "books" not in PersonSerializer.get_prefetch_fields()
+    assert "location" in PersonSerializer.get_prefetch_fields()
