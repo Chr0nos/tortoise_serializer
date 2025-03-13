@@ -10,6 +10,10 @@ This project was created to address some of the limitations of `pydantic_model_c
 - Support for adding extra logic to specific serializers.
 - The ability to document fields in a way that is visible in Swagger.
 
+## Usefull readings
+- https://docs.pydantic.dev/latest/
+- https://tortoise.github.io/
+
 
 ## Installation
 ```shell
@@ -272,7 +276,15 @@ assert serializer.answer_to_the_question == 42
 All async resolvers will be resolved in concurency in a `asyncio.gather`, non-async ones will be resolved one after the other
 
 ## Model Serializers
-Sometime it may be usefull or necessary to be able to create a row and it's related foreignkeys at once in one endpoint, to achieve that the `ModelSerializer` class exists:
+Sometime it may be usefull or necessary to be able to create a row and it's related foreignkeys at once in one endpoint, to achieve that the `ModelSerializer` class exists
+
+Models serializer can manage:
+- [x] Foreign keys
+- [x] Backward foreign key
+- [x] Many2Many relations
+- [x] One to one relationship
+
+### Basic Usage
 ```python
 from tortoise import Model, fields
 from tortoise_serializer import ModelSerializer
@@ -313,8 +325,108 @@ example = await serializer.create_tortoise_instance()
 assert await Book.filter(name="Some Title", shelv__name="where examples lie").exists()
 ```
 
-Models serializer can manage:
-- [x] Foreign keys
-- [x] Backward foreign key
-- [x] Many2Many relations
-- [x] One to one relationship
+### FastAPI
+Since Serializers inherit from `pydantic.BaseModel` it means you can safely use them with FastAPI without any extra effort
+
+Fastapi Documentation: https://fastapi.tiangolo.com/
+
+#### Example
+```python
+from fastapi import status, Body, HTTPException
+from fastapi.routing import APIRouter
+from pydantic import Field
+from tortoise import Model, fields
+from tortoise.transaction import in_transaction
+from tortoise_serializer import ModelSerializer
+
+# Tortoise Models
+
+class Author(Model):
+    id = models.IntegerField(primary_key=True)
+    name = models.CharField(max_length=200, unique=True)
+
+
+class Book(Model):
+    id = fields.IntegerField(primary_key=True)
+    title = fields.CharField(max_length=200)
+    pages_count = fields.IntegerField()
+    author = fields.ForeignKeyField("models.Author", related_name="books")
+
+
+# Serializer for creation
+
+class AuthorCreationSerializer(ModelSerializer[Author]):
+    name: str
+
+
+class BookCreationSerializer(ModelSerializer[Book]):
+    title: str = Field(max_length=200)
+    author: AuthorCreationSerializer
+
+    async def _get_or_create_author(self):
+        # here's an example of get or create flow using the serializers
+        author = await Author.filter(name=self.author.name).get_or_none()
+        if not author:
+            author = await self.author.create_tortoise_instance()
+
+    async def create_tortoise_instance(self, *args,  **kwargs) -> Book:
+        kwargs["author"] = await self._get_or_create_author()
+        return await super().create_tortoise_instance(*args, **kwargs)
+
+
+# Serializer for reading
+
+class AuthorSerializer(ModelSerializer[Author]):
+    id: int
+    name: str
+
+
+class BookSerializer(ModelSerializer[Book]):
+    id: int
+    title: str
+    author: AuthorSerializer
+
+# Views to manage the books
+
+router = APIRouter(prefix="/test")
+
+
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_book(serializer: BookCreationSerializer = Body(...)) -> BookSerializer:
+    async with in_transaction():
+        book = await serializer.create_tortoise_instance()
+    return await BookSerializer.from_tortoise_orm(book)
+
+
+@router.get("")
+async def list_books() -> list[BookSerializer]:
+    queryset = Book.all().prefetch_related(*BookSerializer.get_prefetch_fields())
+    return await BookSerializer.from_queryset(queryset)
+
+
+@router.get("/{book_id}")
+async def get_book(book_id: int) -> BookSerializer:
+    book = await (
+        Book.filter(id=book_id)
+        .prefetch_related(*BookSerializer.get_prefetch_fields())
+        .get_or_none()
+    )
+    if not book:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such book")
+    return await BookSerializer.from_tortoise_orm(book)
+
+
+@router.delete("/{book_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_book(book_id: int) -> None:
+    await Book.filter(id=book_id).delete()
+
+
+@router.patch("{book_id}")
+async def update_book(book_id: int, update: BookCreationSerializer) -> BookSerializer:
+    book = await Book.get_or_none(id=book_id)
+    if not book:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such book")
+    book.author = await update._get_or_create_author()
+    await update.partial_update_tortoise_instance(book)
+    return await BookSerializer.from_tortoise_orm(book)
+```
