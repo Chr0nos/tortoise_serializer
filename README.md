@@ -427,7 +427,7 @@ async def update_book(book_id: int, update: BookCreationSerializer) -> BookSeria
     if not book:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such book")
     book.author = await update._get_or_create_author()
-    await update.partial_update_tortoise_instance(book)
-    await book.save()
+    update.partial_update_tortoise_instance(book)
+    await book.save().
     return await BookSerializer.from_tortoise_orm(book)
 ```
