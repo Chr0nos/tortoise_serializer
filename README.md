@@ -363,11 +363,12 @@ class BookCreationSerializer(ModelSerializer[Book]):
     title: str = Field(max_length=200)
     author: AuthorCreationSerializer
 
-    async def _get_or_create_author(self):
+    async def _get_or_create_author(self) -> Author:
         # here's an example of get or create flow using the serializers
         author = await Author.filter(name=self.author.name).get_or_none()
         if not author:
             author = await self.author.create_tortoise_instance()
+        return author
 
     async def create_tortoise_instance(self, *args,  **kwargs) -> Book:
         kwargs["author"] = await self._get_or_create_author()
