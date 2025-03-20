@@ -596,7 +596,6 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         exclude = set()
         many_to_manys: dict[str, list[Model]] = {}
         backward_fks: dict[str, list[ModelSerializer]] = {}
-        fw_relations_instances: dict[str, list[ModelSerializer]] = {}
         model_class = self.get_model_class()
 
         # as tempting as it might be, don't try to put that into a concurent
@@ -648,13 +647,12 @@ class ModelSerializer(Serializer, Generic[MODEL]):
                     _context=_context,
                 )
 
-                # no need to keep the serializer instance in the context: we instead
-                # will use the `id` only
+                # assign both `field_name_id` and `field_name` to have them
+                # in the instance available (for external use) and avoid to
+                # have to re-fetch them
                 creation_kwargs[field_name + "_id"] = relation_instance.id
+                creation_kwargs[field_name] = relation_instance
                 exclude.add(field_name)
-
-                # keep the relation instance to set it later in the object
-                fw_relations_instances[field_name] = relation_instance
 
         merged_kwargs = creation_kwargs | kwargs
         if _exclude:
@@ -667,10 +665,6 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         )
         for field_name, instances in many_to_manys.items():
             await getattr(instance, field_name).add(*instances)
-
-        # Set forward foreign key in the current instance
-        for field_name, instance in fw_relations_instances.items():
-            setattr(instance, field_name, instance)
 
         await self._create_backward_fks(
             model_class, instance, backward_fks, _context
