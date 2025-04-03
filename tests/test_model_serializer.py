@@ -1,7 +1,9 @@
+from typing import override
+
 from tortoise.transactions import in_transaction
 
 from tests.models import Book, BookShelf, Location, Person
-from tortoise_serializer import ModelSerializer
+from tortoise_serializer import ContextType, ModelSerializer
 
 
 async def test_model_creation():
@@ -156,3 +158,32 @@ def test_nested_serializer_get_prefetch_fields():
     # books does not exists in the `Person` model so it should not be there
     assert "books" not in PersonSerializer.get_prefetch_fields()
     assert "location" in PersonSerializer.get_prefetch_fields()
+
+
+async def test_context_preservation_accoss_multiples_serializers():
+    class LocationSerializer(ModelSerializer[Location]):
+        name: str
+
+        @override
+        async def create_tortoise_instance(
+            self, _exclude=None, _context: ContextType | None = None, **kwargs
+        ) -> Location:
+            kwargs["name"] = _context["location_name"]
+            return await super().create_tortoise_instance(
+                _exclude, _context, **kwargs
+            )
+
+    class PersonSerializer(ModelSerializer[Person]):
+        name: str
+        location: LocationSerializer
+
+    serializer = PersonSerializer(
+        name="John",
+        location=LocationSerializer(name="Replace me"),
+    )
+
+    john = await serializer.create_tortoise_instance(
+        _context={"location_name": "Neverland"}
+    )
+    assert john.location
+    assert john.location.name == "Neverland"
