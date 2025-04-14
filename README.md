@@ -432,3 +432,27 @@ async def update_book(book_id: int, update: BookCreationSerializer) -> BookSeria
     await book.save().
     return await BookSerializer.from_tortoise_orm(book)
 ```
+
+### Optimizing Database Queries with Field Selection
+
+Starting from `tortoise-orm` version 0.25.0, you can optimize your database queries by only fetching the fields that will be serialized. This feature helps reduce database load and improve performance by avoiding unnecessary field fetches.
+
+Here's how to use it:
+
+```python
+class LocationSerializer[ModelSerializer[Location]]:
+    id: str
+    name: str
+
+
+class PersonSerializer(ModelSerializer[Person]):
+    id: int
+    name: str
+    location: LocationSerializer
+
+
+persons = await PersonSerializer.from_queryset(
+    Person.all().only(*PersonSerializer.get_only_fetch_fields())
+)
+
+```

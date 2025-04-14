@@ -746,3 +746,53 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         # in the model so we avoid to return wrong fields in the prefetch
         # requests
         return field_name in cls.get_model_fields()
+
+    @classmethod
+    def get_only_fetch_fields(cls, path: str | None = None) -> list[str]:
+        """
+        Get the list of fields that should be fetched from the database.
+
+        This method recursively traverses the serializer's fields and nested
+        serializers to build a list of database fields that need to be fetched.
+        It handles both direct model fields and nested relationships.
+
+        Args:
+            path (str | None): Optional path prefix for nested fields. Used
+                internally for recursion.
+
+        Returns:
+            list[str]: List of field paths that should be fetched from the
+                database.
+
+        Raises:
+            TortoiseSerializerException: If a nested serializer is not properly
+                configured to inherit from ModelSerializer.
+        """
+        fields = []
+        model = cls.get_model_class()
+        for field_name in cls.model_fields.keys():
+            # Skip computed fields that don't exist in the model
+            if field_name not in model._meta.fields_map.keys():
+                continue
+
+            if cls._is_nested_serializer(field_name):
+                args = get_args(cls.__annotations__[field_name])
+                serializers = list(
+                    [
+                        arg
+                        for arg in args
+                        if (
+                            isinstance(arg, type)
+                            and issubclass(arg, ModelSerializer)
+                        )
+                    ]
+                )
+                serializer = serializers[0]
+                nested_fields = serializer.get_only_fetch_fields(
+                    path=f"{path or ''}{field_name}__"
+                )
+                fields.extend(nested_fields)
+            else:
+                fields.append(f"{path or ''}{field_name}")
+
+        return fields
