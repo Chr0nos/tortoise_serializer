@@ -1,12 +1,9 @@
 from typing import override
 
-import pytest
-from pydantic import BaseModel
 from tortoise.transactions import in_transaction
 
 from tests.models import Book, BookShelf, Location, Person
 from tortoise_serializer import ContextType, ModelSerializer
-from tortoise_serializer.exceptions import TortoiseSerializerException
 
 
 async def test_model_creation():
