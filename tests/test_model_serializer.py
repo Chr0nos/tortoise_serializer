@@ -187,3 +187,36 @@ async def test_context_preservation_accoss_multiples_serializers():
     )
     assert john.location
     assert john.location.name == "Neverland"
+
+
+async def test_get_only_fetch_fields():
+    class LocationSerializer(ModelSerializer[Location]):
+        id: int
+        name: str
+
+    class PersonSerializer(ModelSerializer[Person]):
+        id: int
+        name: str
+        location: LocationSerializer | None
+
+    assert PersonSerializer.get_only_fetch_fields() == [
+        "id",
+        "name",
+        "location__id",
+        "location__name",
+    ]
+
+    john = await Person.create(
+        name="John", location=await Location.create(name="Somewhere")
+    )
+    john_serialized = (
+        await PersonSerializer.from_queryset(
+            Person.filter(id=john.id).only(
+                *PersonSerializer.get_only_fetch_fields()
+            )
+        )
+    )[0]
+    assert john_serialized.location.id == john.location.id
+    assert john_serialized.location.name == john.location.name
+    assert john_serialized.id == john.id
+    assert john_serialized.name == john.name
