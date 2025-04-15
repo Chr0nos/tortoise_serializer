@@ -300,6 +300,7 @@ class Book(Model):
         related_name="books",
     )
 
+
 class BookShelf(Model):
     id = fields.IntField(primary_key=True)
     name = fields.CharField(unique=True, max_length=200)
@@ -312,7 +313,7 @@ class ShelfCreationSerializer(ModelSerializer[BookShelf]):
 
 class BookCreationSerializer(ModelSerializer[Book]):
     title: str
-    # here ofc it's a bit weird to create the shelves with the books but
+    # here of course it's a bit weird to create the shelves with the books but
     # it's only for the example
     shelf: ShelfCreationSerializer
 
