@@ -26,6 +26,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install poetry
+        poetry env use 3.12
         poetry install
     - name: Check norm
       run: |
