@@ -170,7 +170,9 @@ async def test_context_preservation_accoss_multiples_serializers():
         ) -> Location:
             kwargs["name"] = _context["location_name"]
             return await super().create_tortoise_instance(
-                _exclude, _context, **kwargs
+                _exclude=_exclude,
+                _context=_context,
+                **kwargs,
             )
 
     class PersonSerializer(ModelSerializer[Person]):

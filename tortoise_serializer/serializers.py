@@ -486,6 +486,7 @@ class Serializer(BaseModel):
     async def create_tortoise_instance(
         self,
         model: Type[MODEL],
+        *,
         _exclude: IncEx | None = None,
         _context: ContextType | None = None,
         **kwargs,
@@ -585,7 +586,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
     @override
     async def create_tortoise_instance(
-        self, _exclude=None, _context: ContextType | None = None, **kwargs
+        self, *, _exclude=None, _context: ContextType | None = None, **kwargs
     ) -> MODEL:
         """Creates the tortoise instance of this serializer and it's nested relations.
         it's highly recommended to use this inside a a `transaction` context
