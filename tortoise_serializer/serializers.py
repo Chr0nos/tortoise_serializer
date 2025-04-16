@@ -668,7 +668,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
             await getattr(instance, field_name).add(*instances)
 
         await self._create_backward_fks(
-            model_class, instance, backward_fks, _context
+            model_class, instance, backward_fks, _context, _exclude or set()
         )
         return instance
 
@@ -678,10 +678,13 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         instance: MODEL,
         backward_fks: dict[str, list[Self]],
         _context: ContextType | None,
+        _exclude: set[str],
     ) -> None:
         """Creates the backward ForeignKeys for a given instance of self.get_model_class"""
 
         for field_name, serializers in backward_fks.items():
+            if field_name in _exclude:
+                continue
             field: fields.ReverseRelation = (
                 serializer_model_class._meta.fields_map[field_name]
             )
