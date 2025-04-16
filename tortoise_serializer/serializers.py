@@ -657,7 +657,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
         merged_kwargs = creation_kwargs | kwargs
         if _exclude:
-            exclude += set(_exclude)
+            exclude = exclude | set(_exclude)
         instance = await super().create_tortoise_instance(
             model_class,
             _exclude=exclude,
