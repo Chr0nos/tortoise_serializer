@@ -1,5 +1,6 @@
 from typing import override
 
+import pytest
 from tortoise.transactions import in_transaction
 
 from tests.models import Book, BookShelf, Location, Person
@@ -170,7 +171,9 @@ async def test_context_preservation_accoss_multiples_serializers():
         ) -> Location:
             kwargs["name"] = _context["location_name"]
             return await super().create_tortoise_instance(
-                _exclude, _context, **kwargs
+                _exclude=_exclude,
+                _context=_context,
+                **kwargs,
             )
 
     class PersonSerializer(ModelSerializer[Person]):
@@ -189,7 +192,7 @@ async def test_context_preservation_accoss_multiples_serializers():
     assert john.location.name == "Neverland"
 
 
-async def test_get_only_fetch_fields():
+async def test_from_queryset_with_select_only():
     class LocationSerializer(ModelSerializer[Location]):
         id: int
         name: str
@@ -211,12 +214,41 @@ async def test_get_only_fetch_fields():
     )
     john_serialized = (
         await PersonSerializer.from_queryset(
-            Person.filter(id=john.id).only(
-                *PersonSerializer.get_only_fetch_fields()
-            )
+            Person.filter(id=john.id), select_only=True
         )
     )[0]
     assert john_serialized.location.id == john.location.id
     assert john_serialized.location.name == john.location.name
     assert john_serialized.id == john.id
     assert john_serialized.name == john.name
+
+
+async def test_from_queryset_with_both_prefetch_and_select_only():
+    class PersonSerializer(ModelSerializer[Person]):
+        id: int
+
+    with pytest.raises(AssertionError):
+        await PersonSerializer.from_queryset(
+            Person.all(), prefetch=True, select_only=True
+        )
+
+
+async def test_from_queryset_with_prefetch():
+    class LocationSerializer(ModelSerializer[Location]):
+        id: int
+        name: str
+
+    class PersonSerializer(ModelSerializer[Person]):
+        id: int
+        name: str
+        location: LocationSerializer
+
+    john = await Person.create(
+        name="John", location=await Location.create(name="Somewhere")
+    )
+    persons = await PersonSerializer.from_queryset(Person.all(), prefetch=True)
+    assert len(persons) == 1
+    assert persons[0].location.id == john.location.id
+    assert persons[0].location.name == john.location.name
+    assert persons[0].id == john.id
+    assert persons[0].name == john.name

@@ -486,6 +486,7 @@ class Serializer(BaseModel):
     async def create_tortoise_instance(
         self,
         model: Type[MODEL],
+        *,
         _exclude: IncEx | None = None,
         _context: ContextType | None = None,
         **kwargs,
@@ -585,7 +586,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
     @override
     async def create_tortoise_instance(
-        self, _exclude=None, _context: ContextType | None = None, **kwargs
+        self, *, _exclude=None, _context: ContextType | None = None, **kwargs
     ) -> MODEL:
         """Creates the tortoise instance of this serializer and it's nested relations.
         it's highly recommended to use this inside a a `transaction` context
@@ -796,3 +797,34 @@ class ModelSerializer(Serializer, Generic[MODEL]):
                 fields.append(f"{path or ''}{field_name}")
 
         return fields
+
+    @classmethod
+    async def from_queryset(
+        cls,
+        queryset: QuerySet,
+        *args,
+        prefetch: bool = False,
+        select_only: bool = False,
+        **kwargs,
+    ) -> list[Self]:
+        """
+        Return a list of Self (ModelSerializer) from the given queryset.
+        All instances are fetched in concurrency using asyncio.
+
+        Parameters:
+        - `queryset`: The QuerySet instance to serialize from
+        - `prefetch`: If True, prefetch the related fields
+        - `select_only`: If True, only fetch the fields that are needed to serialize the model
+                         Note that only the fields defined in the serializer
+                         and its nested serializers are considered, be careful
+                         with the resolvers needs
+        any *args, *kwargs will be passed to `Serializer.from_queryset` method."""
+        assert not (
+            prefetch and select_only
+        ), "prefetch and select_only cannot be true at the same time"
+        if prefetch:
+            queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
+        elif select_only:
+            queryset = queryset.only(*cls.get_only_fetch_fields())
+
+        return await super().from_queryset(queryset, *args, **kwargs)
