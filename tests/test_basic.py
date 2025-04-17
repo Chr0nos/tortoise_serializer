@@ -4,7 +4,12 @@ from typing import Any
 import pytest
 
 from tests.models import Book, BookShelf, Person
-from tortoise_serializer import ContextType, Serializer
+from tortoise_serializer import (
+    ContextType,
+    Serializer,
+    require_condition_or_unset,
+    resolver,
+)
 
 
 async def test_book_serialization():
@@ -285,3 +290,37 @@ async def test_prefetch_nested():
     assert SerializerC._is_nested_serializer("b")
     assert SerializerB._is_nested_serializer("a")
     assert SerializerC.get_prefetch_fields() == ["b", "b__a"]
+
+
+async def test_resolver_decorator():
+    async def check_margin_permission(
+        instance: Book, context: ContextType
+    ) -> bool:
+        return False
+
+    class BookSerializer(Serializer):
+        title: str
+        discount: float
+        margin: float | None = None
+
+        @resolver("discount")
+        def _discount(cls, instance: Book, context: ContextType) -> float:
+            return 0.15
+
+        @resolver("title")
+        @require_condition_or_unset(lambda instance, context: True)
+        def _clean_title(cls, instance: Book, context: ContextType) -> str:
+            return instance.title.title().strip()
+
+        @resolver("margin")
+        @require_condition_or_unset(check_margin_permission)
+        async def _margin(cls, instance: Book, context: ContextType) -> float:
+            return 0.15
+
+    book = await Book.create(
+        title="testing with title", price=10, page_count=200
+    )
+    serializer = await BookSerializer.from_tortoise_orm(book)
+    assert serializer.discount == 0.15
+    assert serializer.title == "Testing With Title"
+    assert serializer.margin is None
