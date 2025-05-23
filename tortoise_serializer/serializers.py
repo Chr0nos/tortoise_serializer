@@ -29,6 +29,7 @@ from tortoise.fields.relational import (
     _NoneAwaitable,
 )
 from tortoise.queryset import QuerySet
+from typing_extensions import deprecated
 
 from tortoise_serializer.exceptions import (
     TortoiseSerializerClassMethodException,
@@ -41,6 +42,7 @@ log_level = logging.INFO
 logging.getLogger(__name__).setLevel(log_level)
 
 
+@deprecated("use require_condition_or_unset instead")
 def require_permission_or_unset(
     permission_checker: Callable[[MODEL, ContextType], bool],
 ):
@@ -73,6 +75,59 @@ def require_permission_or_unset(
             cls, instance: MODEL, context: ContextType
         ) -> T | UnsetType:
             if not permission_checker(instance, context):
+                return Unset
+            return await func(cls, instance, context)
+
+        return wrapper if not iscoroutinefunction(func) else a_wrapper
+
+    return decorator
+
+
+def require_condition_or_unset(
+    condition_checker: Callable[[MODEL, ContextType], bool],
+) -> Callable[[Callable[..., T]], Callable[..., T | UnsetType]]:
+    """Ensure the condition is met for the decorated resolver.
+    If the condition is False then this will return UnsetType instead of
+    calling the decorated resolver.
+
+    This is a generic version that can be used for any condition, not just permissions.
+
+    :example:
+    ```python
+    def is_visible(instance: Model, context: ContextType) -> bool:
+        return instance.is_public or context.get("user") == instance.owner
+
+    @require_condition_or_unset(is_visible)
+    def resolve_content(cls, instance: Post, context) -> str:
+        return instance.content
+
+    def is_valid_time(instance: Model, context: ContextType) -> bool:
+        return datetime.now() >= instance.publish_time
+
+    @require_condition_or_unset(is_valid_time)
+    def resolve_premium_content(cls, instance: Article, context) -> str:
+        return instance.premium_content
+    ```
+    """
+
+    def decorator(func: Callable[..., T]) -> Callable[..., T | UnsetType]:
+        @wraps(func)
+        def wrapper(
+            cls, instance: MODEL, context: ContextType
+        ) -> T | UnsetType:
+            if not condition_checker(instance, context):
+                return Unset
+            return func(cls, instance, context)
+
+        @wraps(func)
+        async def a_wrapper(
+            cls, instance: MODEL, context: ContextType
+        ) -> T | UnsetType:
+            condition_result = condition_checker(instance, context)
+            # the async wrapper support async condition checkers
+            if inspect.iscoroutine(condition_result):
+                condition_result = await condition_result
+            if not condition_result:
                 return Unset
             return await func(cls, instance, context)
 
@@ -388,28 +443,41 @@ class Serializer(BaseModel):
     ) -> list["Serializer"]:
         """
         Get a list of nested serializers for the given field, if any.
-        """
-        try:
-            field_annotation = cls.model_fields[field_name].annotation
-            args = get_args(field_annotation)
 
-            # Return all nested serializers from the field's type hints
-            return (
-                [
-                    arg
-                    for arg in args
-                    if isinstance(arg, type) and issubclass(arg, Serializer)
-                ]
-                if args
-                else (
-                    [field_annotation]
-                    if isinstance(field_annotation, type)
-                    and issubclass(field_annotation, Serializer)
-                    else []
-                )
-            )
-        except (KeyError, TypeError):
+        Args:
+            field_name: The name of the field to check for nested serializers
+
+        Returns:
+            A list of nested Serializer classes found in the field's type hints.
+            Returns an empty list if no nested serializers are found or if the field
+            doesn't exist.
+        """
+        if (
+            not hasattr(cls, "model_fields")
+            or field_name not in cls.model_fields
+        ):
             return []
+
+        field_annotation = cls.model_fields[field_name].annotation
+        if not field_annotation:
+            return []
+
+        # Handle generic types (like list[Serializer])
+        type_args = get_args(field_annotation)
+        if type_args:
+            return [
+                arg
+                for arg in type_args
+                if isinstance(arg, type) and issubclass(arg, Serializer)
+            ]
+
+        # Handle direct Serializer type
+        if isinstance(field_annotation, type) and issubclass(
+            field_annotation, Serializer
+        ):
+            return [field_annotation]
+
+        return []
 
     @classmethod
     @lru_cache()
@@ -450,12 +518,23 @@ class Serializer(BaseModel):
     def _collect_resolvers(
         cls,
     ) -> dict[str, Callable[[Model, Any], Awaitable[Any]]]:
+        """Collect all resolvers defined in the class, both method-based and decorator-based."""
         fields = {}
+
+        # Collect method-based resolvers (starting with resolve_)
         for method in dir(cls):
             if method.startswith("resolve_") and callable(
                 getattr(cls, method)
             ):
                 fields[method.removeprefix("resolve_")] = getattr(cls, method)
+
+        # Collect decorator-based resolvers
+        for attr_name in dir(cls):
+            attr = getattr(cls, attr_name)
+            if callable(attr) and hasattr(attr, "_resolver_fields"):
+                for field_name in attr._resolver_fields:
+                    fields[field_name] = attr
+
         return fields
 
     def partial_update_tortoise_instance(self, model: Model, **kwargs) -> bool:
