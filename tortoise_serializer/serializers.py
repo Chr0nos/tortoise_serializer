@@ -159,6 +159,8 @@ class Serializer(BaseModel):
         computed_fields: dict[str, Callable[[Model, Any], Awaitable[Any]]]
         | None = None,
         context: dict[str, Any] | ContextType | None = None,
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
     ) -> Self:
         if computed_fields is None:
             computed_fields = {}
@@ -180,7 +182,7 @@ class Serializer(BaseModel):
         ) = await asyncio.gather(
             cls._resolve_model_fields(instance),
             cls._resolve_foreignkeys(
-                instance, frozen_context, computed_fields
+                instance, frozen_context, computed_fields, by_alias, by_name
             ),
             cls._resolve_computed_fields(
                 instance, frozen_context, computed_fields
@@ -190,7 +192,9 @@ class Serializer(BaseModel):
         fields_values = models_fields | fk_fields | computed_fields_values
         cls._remove_unsets(fields_values)
         try:
-            return cls.model_validate(fields_values)
+            return cls.model_validate(
+                fields_values, by_alias=by_alias, by_name=by_name
+            )
         except ValidationError:
             logger.error(
                 "Failed to validate with model",
@@ -202,6 +206,8 @@ class Serializer(BaseModel):
                 fk_fields=fk_fields,
                 computed_fields_values=computed_fields_values,
                 computed_fields=computed_fields,
+                by_alias=by_alias,
+                by_name=by_name,
             )
             raise
 
@@ -314,6 +320,8 @@ class Serializer(BaseModel):
         instance: Model,
         context: ContextType,
         computed_fields: dict[str, Callable[[Model, Any], Awaitable[Any]]],
+        by_alias: bool | None = None,
+        by_name: bool | None = None,
     ) -> dict[str, Any]:
         data = {}
         for field_name, serializers in cls._get_nested_serializers().items():
@@ -349,6 +357,8 @@ class Serializer(BaseModel):
                         instance,
                         context=context,
                         computed_fields=computed_fields.get(field_name, None),
+                        by_alias=by_alias,
+                        by_name=by_name,
                     )
                     for instance in relational_instance.related_objects
                 ]
@@ -361,6 +371,8 @@ class Serializer(BaseModel):
                     relational_instance,
                     context=context,
                     computed_fields=computed_fields.get(field_name, None),
+                    by_alias=by_alias,
+                    by_name=by_name,
                 )
             data[field_name] = value
         return data

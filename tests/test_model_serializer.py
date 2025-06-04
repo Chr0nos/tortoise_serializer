@@ -1,6 +1,7 @@
 from typing import override
 
 import pytest
+from pydantic import Field
 from tortoise.transactions import in_transaction
 
 from tests.models import Book, BookShelf, Location, Person
@@ -252,3 +253,27 @@ async def test_from_queryset_with_prefetch():
     assert persons[0].location.name == john.location.name
     assert persons[0].id == john.id
     assert persons[0].name == john.name
+
+
+async def test_empty_backward_fk():
+    class BookSerializer(ModelSerializer[Book]):
+        title: str
+
+    class ShelfSerializer(ModelSerializer[BookShelf]):
+        name: str
+        books: list[BookSerializer]
+
+    serializer = ShelfSerializer(name="test", books=[])
+    shelve = await serializer.create_tortoise_instance()
+    assert await shelve.books.all().count() == 0
+
+
+async def test_by_name():
+    class BookSerializer(ModelSerializer[Book]):
+        id: int
+        title: str = Field(alias="name")
+
+    book = await Book.create(title="LOTR")
+    serializer = await BookSerializer.from_tortoise_orm(book, by_name=True)
+    assert serializer.id == book.id
+    assert serializer.title == "LOTR"
