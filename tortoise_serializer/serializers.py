@@ -587,8 +587,7 @@ class Serializer(BaseModel):
 
     def has_been_set(self, field_name: str) -> bool:
         """Return True if `field_name` has been set, otherwise False"""
-        data = self.model_dump(include={field_name}, exclude_unset=True)
-        return field_name in data
+        return field_name in self.model_fields_set
 
     @classmethod
     def get_prefetch_fields_generator(
