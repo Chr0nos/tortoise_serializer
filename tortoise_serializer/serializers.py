@@ -213,10 +213,16 @@ class Serializer(BaseModel):
 
     @classmethod
     async def from_tortoise_instances(
-        cls, instances: Sequence[Model], **kwargs
+        cls,
+        instances: Sequence[Model],
+        **kwargs,
     ) -> list[Self]:
         """Return a list of Self (Serializer) for the given sequence of
         tortoise instances
+
+        Args:
+            instances: Sequence of model instances to serialize
+            **kwargs: Other arguments to pass to `from_tortoise_orm`
         """
         return await asyncio.gather(
             *[
@@ -352,17 +358,13 @@ class Serializer(BaseModel):
 
             # handle reverse relations
             elif isinstance(relational_instance, fields.ReverseRelation):
-                tasks = [
-                    serializer.from_tortoise_orm(
-                        instance,
-                        context=context,
-                        computed_fields=computed_fields.get(field_name, None),
-                        by_alias=by_alias,
-                        by_name=by_name,
-                    )
-                    for instance in relational_instance.related_objects
-                ]
-                value = await asyncio.gather(*tasks)
+                value = await serializer.from_tortoise_instances(
+                    relational_instance.related_objects,
+                    computed_fields=computed_fields.get(field_name, None),
+                    context=context,
+                    by_alias=by_alias,
+                    by_name=by_name,
+                )
 
             # validating the nested relationship with a from_tortoise_orm call
             # to the nested serializer
