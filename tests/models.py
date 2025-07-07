@@ -35,3 +35,39 @@ class Person(Model):
         related_name="borrowers",
     )
     location = fields.OneToOneField("models.Location", null=True, default=None)
+
+
+class User(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    location: fields.ForeignKeyNullableRelation[Location] = (
+        fields.ForeignKeyField(
+            "models.Location",
+            null=True,
+            default=None,
+            related_name="users",
+        )
+    )
+
+
+class Tournament(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    participants: fields.ManyToManyRelation[User] = fields.ManyToManyField(
+        "models.User",
+        related_name="tournaments",
+    )
+    description = fields.TextField(null=True)
+    created = fields.DatetimeField(auto_now_add=True, db_index=True)
+
+
+class Node(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    parent: fields.ForeignKeyNullableRelation["Node"] = fields.ForeignKeyField(
+        "models.Node",
+        null=True,
+        default=None,
+        related_name="children",
+    )
+    children: fields.ReverseRelation["Node"]
