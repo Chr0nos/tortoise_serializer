@@ -16,7 +16,7 @@ async def test_ensure_fetched_fields():
 
         @resolver("children")
         @ensure_fetched_fields(["children"])
-        async def resolve_children(self, instance: Node, context: ContextType):
+        async def resolve_children(cls, instance: Node, context: ContextType):
             return await NodeSerializer.from_tortoise_instances(
                 instance.children,
                 context=context,
