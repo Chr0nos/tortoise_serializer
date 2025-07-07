@@ -71,3 +71,6 @@ class Node(Model):
         related_name="children",
     )
     children: fields.ReverseRelation["Node"]
+
+    # type hints
+    parent_id: int | None
