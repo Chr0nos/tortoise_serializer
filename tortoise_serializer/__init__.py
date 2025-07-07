@@ -6,9 +6,11 @@ from .serializers import (
     require_permission_or_unset,
 )
 from .types import ContextType, Unset, UnsetType
+from .utils import ensure_fetched_fields
 
 __all__ = [
     "ContextType",
+    "ensure_fetched_fields",
     "ModelSerializer",
     "ModelSerializer",
     "require_condition_or_unset",

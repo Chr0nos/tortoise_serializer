@@ -353,7 +353,10 @@ class Serializer(BaseModel):
             # handling many to many relationships
             elif isinstance(relational_instance, ManyToManyRelation):
                 value = await serializer.from_tortoise_instances(
-                    relational_instance.related_objects, context=context
+                    relational_instance.related_objects,
+                    context=context,
+                    by_alias=by_alias,
+                    by_name=by_name,
                 )
 
             # handle reverse relations
@@ -369,7 +372,7 @@ class Serializer(BaseModel):
             # validating the nested relationship with a from_tortoise_orm call
             # to the nested serializer
             else:
-                value = await serializers[0].from_tortoise_orm(
+                value = await serializer.from_tortoise_orm(
                     relational_instance,
                     context=context,
                     computed_fields=computed_fields.get(field_name, None),
