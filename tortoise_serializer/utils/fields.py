@@ -2,11 +2,21 @@ from functools import wraps
 from typing import Callable, Sequence
 
 from structlog import get_logger
+from tortoise.queryset import QuerySet
 
 from tortoise_serializer.serializers import Serializer
 from tortoise_serializer.types import MODEL, T
 
 logger = get_logger()
+
+
+def _should_fetch_field(instance: MODEL, field_name: str) -> bool:
+    field = getattr(instance, field_name)
+    if isinstance(field, QuerySet):
+        return True
+    if getattr(field, "_fetched", None) is True:
+        return False
+    return True
 
 
 def ensure_fetched_fields(
@@ -43,9 +53,7 @@ def ensure_fetched_fields(
             fields_to_fetch = [
                 field_name
                 for field_name in field_names
-                if not getattr(
-                    getattr(instance, field_name, None), "_fetched", True
-                )
+                if _should_fetch_field(instance, field_name)
             ]
             if fields_to_fetch:
                 logger.debug(
