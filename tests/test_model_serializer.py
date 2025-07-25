@@ -2,9 +2,10 @@ from typing import override
 
 import pytest
 from pydantic import Field
+from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
 
-from tests.models import Book, BookShelf, Location, Person
+from tests.models import Book, BookShelf, Location, Person, User
 from tortoise_serializer import ContextType, ModelSerializer
 
 
@@ -277,3 +278,56 @@ async def test_by_name():
     serializer = await BookSerializer.from_tortoise_orm(book, by_name=True)
     assert serializer.id == book.id
     assert serializer.title == "LOTR"
+
+
+async def test_from_single_queryset():
+    class BookSerializer(ModelSerializer[Book]):
+        id: int
+        title: str
+
+    book = await Book.create(title="LOTR")
+    serializer = await BookSerializer.from_single_queryset(
+        Book.get(id=book.id)
+    )
+    assert serializer.id == book.id
+    assert serializer.title == "LOTR"
+
+
+async def test_from_single_queryset_with_prefetch():
+    class LocationSerializer(ModelSerializer[Location]):
+        id: int
+        name: str
+
+    class UserSerializer(ModelSerializer[User]):
+        id: int
+        name: str
+        location: LocationSerializer
+
+    user = await User.create(
+        name="John", location=await Location.create(name="Somewhere")
+    )
+    serializer = await UserSerializer.from_single_queryset(
+        User.get(id=user.id), prefetch=True
+    )
+    assert serializer.id == user.id
+    assert serializer.name == user.name
+
+
+async def test_from_single_queryset_without_match():
+    class UserSerializer(ModelSerializer[User]):
+        id: int
+        name: str
+
+    serializer = await UserSerializer.from_single_queryset_or_none(
+        User.get(id=1)
+    )
+    assert serializer is None
+
+
+async def test_from_single_queryset_exception():
+    class UserSerializer(ModelSerializer[User]):
+        id: int
+        name: str
+
+    with pytest.raises(DoesNotExist):
+        await UserSerializer.from_single_queryset(User.get(id=1))

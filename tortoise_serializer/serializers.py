@@ -21,6 +21,7 @@ from pydantic import BaseModel, ValidationError
 from pydantic.main import IncEx
 from structlog import get_logger
 from tortoise import Model, fields
+from tortoise.exceptions import DoesNotExist
 from tortoise.fields.relational import (
     BackwardFKRelation,
     ForeignKeyFieldInstance,
@@ -28,7 +29,7 @@ from tortoise.fields.relational import (
     ManyToManyRelation,
     _NoneAwaitable,
 )
-from tortoise.queryset import QuerySet
+from tortoise.queryset import QuerySet, QuerySetSingle
 from typing_extensions import deprecated
 
 from tortoise_serializer.exceptions import (
@@ -926,3 +927,36 @@ class ModelSerializer(Serializer, Generic[MODEL]):
             queryset = queryset.only(*cls.get_only_fetch_fields())
 
         return await super().from_queryset(queryset, *args, **kwargs)
+
+    @classmethod
+    async def from_single_queryset(
+        cls,
+        queryset: QuerySetSingle[MODEL],
+        prefetch: bool = True,
+        *args,
+        **kwargs,
+    ) -> Self:
+        """
+        Return a single Self from the given queryset or raises a DoesNotExist
+        exception if the queryset is empty
+        """
+        if prefetch:
+            queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
+        instance: MODEL = await queryset
+        return await cls.from_tortoise_orm(instance, *args, **kwargs)
+
+    @classmethod
+    async def from_single_queryset_or_none(
+        cls,
+        queryset: QuerySetSingle[MODEL],
+        *args,
+        **kwargs,
+    ) -> Self | None:
+        """
+        Return a single Self from the given queryset or None if the queryset
+        is empty
+        """
+        try:
+            return await cls.from_single_queryset(queryset, *args, **kwargs)
+        except DoesNotExist:
+            return None
