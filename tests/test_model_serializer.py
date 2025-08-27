@@ -1,3 +1,4 @@
+from datetime import timedelta
 from typing import override
 
 import pytest
@@ -5,7 +6,8 @@ from pydantic import Field
 from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
 
-from tests.models import Book, BookShelf, Location, Person, User
+from tests.models import Book, BookShelf, Location, Message, Person, User
+from tests.schemas import MessageMetadata
 from tortoise_serializer import ContextType, ModelSerializer
 
 
@@ -331,3 +333,55 @@ async def test_from_single_queryset_exception():
 
     with pytest.raises(DoesNotExist):
         await UserSerializer.from_single_queryset(User.get(id=1))
+
+
+async def test_pydantic_json_decoder_as_dict():
+    class MessageSerializer(ModelSerializer[Message]):
+        id: int
+        content: str
+        metadata: dict
+
+    metadata = {
+        "thread_id": 1,
+        "sender_id": 2,
+        "receiver_id": 3,
+        "metrics": {
+            "speed": {"value": 100, "rationale": "Fast"},
+            "accuracy": {"value": 90, "rationale": "Good"},
+        },
+        "begin": "00:00:00",
+        "end": "00:00:04",
+    }
+    message = await Message.create(content="Hello, world!", metadata=metadata)
+    serializer = await MessageSerializer.from_tortoise_orm(message)
+    assert serializer.content == "Hello, world!"
+    assert serializer.metadata == metadata
+
+
+async def test_pydantic_json_decoder_as_schema():
+    class MessageSerializer(ModelSerializer[Message]):
+        id: int
+        content: str
+        metadata: MessageMetadata
+
+    metadata = {
+        "thread_id": 1,
+        "sender_id": 2,
+        "receiver_id": 3,
+        "metrics": {
+            "speed": {"value": 100, "rationale": "Fast"},
+            "accuracy": {"value": 90, "rationale": "Good"},
+        },
+        "begin": "00:00:00",
+        "end": "00:00:04",
+        "some_extra_stuff": True,
+    }
+    message = await Message.create(content="Hello, world!", metadata=metadata)
+    serializer = await MessageSerializer.from_tortoise_orm(message)
+    assert serializer.content == "Hello, world!"
+    assert serializer.metadata.thread_id == 1
+    assert serializer.metadata.sender_id == 2
+    assert serializer.metadata.receiver_id == 3
+    assert serializer.metadata.begin == timedelta(seconds=0)
+    assert serializer.metadata.end == timedelta(seconds=4)
+    assert serializer.metadata.some_extra_stuff is True

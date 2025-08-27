@@ -1,6 +1,8 @@
 from tortoise import Model, fields
 from tortoise.fields.relational import BackwardFKRelation
 
+from tests.schemas import MessageMetadata
+
 
 class Book(Model):
     id = fields.IntField(primary_key=True)
@@ -74,3 +76,12 @@ class Node(Model):
 
     # type hints
     parent_id: int | None
+
+
+class Message(Model):
+    id = fields.IntField(primary_key=True)
+    content = fields.TextField()
+    metadata = fields.JSONField(
+        decoder=MessageMetadata.model_validate_json,
+    )
+    created = fields.DatetimeField(auto_now_add=True, db_index=True)
