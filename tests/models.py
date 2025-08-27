@@ -81,7 +81,8 @@ class Node(Model):
 class Message(Model):
     id = fields.IntField(primary_key=True)
     content = fields.TextField()
-    metadata = fields.JSONField(
+    metadata = fields.JSONField[MessageMetadata](
         decoder=MessageMetadata.model_validate_json,
+        encoder=lambda x: MessageMetadata.model_validate(x).model_dump_json(),
     )
     created = fields.DatetimeField(auto_now_add=True, db_index=True)

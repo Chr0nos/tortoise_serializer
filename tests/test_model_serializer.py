@@ -385,3 +385,74 @@ async def test_pydantic_json_decoder_as_schema():
     assert serializer.metadata.begin == timedelta(seconds=0)
     assert serializer.metadata.end == timedelta(seconds=4)
     assert serializer.metadata.some_extra_stuff is True
+
+
+async def test_pydantic_json_write():
+    class MessageSerializer(ModelSerializer[Message]):
+        id: int
+        content: str
+        metadata: MessageMetadata
+
+    serializer = MessageSerializer(
+        id=1,
+        content="Hello, world!",
+        metadata=MessageMetadata(
+            thread_id=1,
+            sender_id=2,
+            receiver_id=3,
+        ),
+    )
+    message = await serializer.create_tortoise_instance()
+    assert message.content == "Hello, world!"
+    # if we don't refresh the instance, the metadata will be a dict
+    message.metadata = MessageMetadata.model_validate(message.metadata)
+    assert message.metadata == MessageMetadata(
+        thread_id=1,
+        sender_id=2,
+        receiver_id=3,
+        begin=None,
+        end=None,
+        metrics={},
+    )
+
+    deserialized_message = await MessageSerializer.from_tortoise_orm(message)
+    assert deserialized_message.content == "Hello, world!"
+    assert isinstance(deserialized_message.metadata, MessageMetadata)
+    assert deserialized_message.metadata.thread_id == 1
+    assert deserialized_message.metadata.sender_id == 2
+    assert deserialized_message.metadata.receiver_id == 3
+    assert deserialized_message.metadata.begin is None
+    assert deserialized_message.metadata.end is None
+    assert deserialized_message.metadata.metrics == {}
+
+
+async def test_pydantic_json_write_timedeltas():
+    class MessageSerializer(ModelSerializer[Message]):
+        id: int
+        content: str
+        metadata: MessageMetadata
+
+    serializer = MessageSerializer(
+        id=1,
+        content="Hello, world!",
+        metadata=MessageMetadata(
+            thread_id=1,
+            sender_id=2,
+            receiver_id=3,
+            begin=timedelta(seconds=0),
+            end=timedelta(seconds=4),
+        ),
+    )
+    message = await serializer.create_tortoise_instance()
+    await message.refresh_from_db()
+    assert message.content == "Hello, world!"
+    assert message.metadata.thread_id == 1
+    assert message.metadata.sender_id == 2
+    assert message.metadata.receiver_id == 3
+    assert message.metadata.begin == timedelta(seconds=0)
+    assert message.metadata.end == timedelta(seconds=4)
+
+    deserialized_message = await MessageSerializer.from_tortoise_orm(message)
+    assert deserialized_message.content == "Hello, world!"
+    assert isinstance(deserialized_message.metadata, MessageMetadata)
+    assert deserialized_message.metadata.thread_id == 1
