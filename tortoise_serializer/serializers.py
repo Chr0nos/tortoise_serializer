@@ -776,8 +776,15 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         _context: ContextType | None,
         _exclude: set[str],
     ) -> None:
-        """Creates the backward ForeignKeys for a given instance of self.get_model_class"""
+        """Creates the backward ForeignKeys for a given instance of self.get_model_class
+        we can't use bulk_create here because the `id` fields
+        (not any db_generated fields) are set by tortoise-orm
+        so we have to create them one by one.
+        since in this context we are probably in a transaction, we can't
+        use asyncio.gather to create them in concurency
 
+        see: https://github.com/tortoise/tortoise-orm/issues/1992
+        """
         for field_name, serializers in backward_fks.items():
             if field_name in _exclude:
                 continue
