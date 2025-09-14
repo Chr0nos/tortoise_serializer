@@ -1,14 +1,25 @@
 from datetime import timedelta
 from typing import override
+from unittest.mock import patch
 
 import pytest
 from pydantic import Field
 from tortoise.exceptions import DoesNotExist
 from tortoise.transactions import in_transaction
 
-from tests.models import Book, BookShelf, Location, Message, Person, User
+from tests.models import (
+    Book,
+    BookShelf,
+    Location,
+    Message,
+    Person,
+    Player,
+    Team,
+    User,
+)
 from tests.schemas import MessageMetadata
 from tortoise_serializer import ContextType, ModelSerializer
+from tortoise_serializer.mixins import BackwardFKBulkCreateMixin
 
 
 async def test_model_creation():
@@ -456,3 +467,113 @@ async def test_pydantic_json_write_timedeltas():
     assert deserialized_message.content == "Hello, world!"
     assert isinstance(deserialized_message.metadata, MessageMetadata)
     assert deserialized_message.metadata.thread_id == 1
+
+
+async def test_backward_fk_bulk_create() -> None:
+    class UserCreationSerializer(ModelSerializer[User]):
+        name: str = Field(max_length=200)
+
+    class LocationCreationSerializer(
+        BackwardFKBulkCreateMixin, ModelSerializer[Location]
+    ):
+        name: str
+        users: list[UserCreationSerializer]
+
+    location = LocationCreationSerializer(
+        name="Somewhere",
+        users=[
+            {"name": "John"},
+            {"name": "Jane"},
+            {"name": "Jim"},
+        ],
+    )
+    async with in_transaction():
+        location = await location.create_tortoise_instance()
+    assert location
+    assert location.users is not None
+    assert len(location.users.related_objects) == 3
+    assert location.users._fetched is True
+    assert await Location.filter(name="Somewhere").exists()
+    assert await User.all().count() == 3
+    assert await location.users.all().count() == 3
+    assert await User.filter(location__name="Somewhere").all().count() == 3
+    assert User.filter(location__name="Somewhere").exists()
+
+
+async def test_nested_backward_fk_bulk_create_mixin():
+    """Test that nested serializers can also use BackwardFKBulkCreateMixin"""
+
+    class UserCreationSerializer(ModelSerializer[User]):
+        name: str
+        # This will be a backward FK relation when created through Location
+
+    class LocationCreationSerializer(
+        BackwardFKBulkCreateMixin, ModelSerializer[Location]
+    ):
+        name: str
+        users: list[UserCreationSerializer]
+
+    location_serializer = LocationCreationSerializer(
+        name="Somewhere",
+        users=[
+            {"name": "John"},
+            {"name": "Jane"},
+            {"name": "Jim"},
+        ],
+    )
+
+    async with in_transaction():
+        location = await location_serializer.create_tortoise_instance()
+
+    assert location
+    assert location.users is not None
+    assert len(location.users.related_objects) == 3
+    assert location.users._fetched is True
+
+    # Verify all users were created and point to the correct location
+    all_users = await User.filter(location=location).all()
+    assert len(all_users) == 3
+
+    # Verify the users have the correct names
+    user_names = {user.name for user in all_users}
+    assert user_names == {"John", "Jane", "Jim"}
+
+
+async def test_nested_backward_fk_bulk_create_mixin_with_many_to_many():
+    class PlayerCreationSerializer(ModelSerializer[Player]):
+        name: str
+
+    class TeamCreationSerializer(
+        BackwardFKBulkCreateMixin, ModelSerializer[Team]
+    ):
+        name: str
+        leaders: list[PlayerCreationSerializer]
+        members: list[PlayerCreationSerializer]
+
+    team = TeamCreationSerializer(
+        name="Test Team",
+        leaders=[{"name": "John"}],
+        members=[
+            {"name": "Alice"},
+            {"name": "Jane"},
+            {"name": "Jim"},
+        ],
+    )
+    async with in_transaction():
+        with patch.object(
+            Player, "bulk_create", wraps=Player.bulk_create
+        ) as mock_bulk_create:
+            team = await team.create_tortoise_instance()
+        mock_bulk_create.assert_called()
+        assert mock_bulk_create.call_count == 2
+    assert team.id is not None
+    assert team.leaders.related_objects[0].name == "John"
+    assert await team.leaders.all().count() == 1
+    assert await team.members.all().count() == 3
+    alice, jane, jim = await team.members.all()
+    assert alice.name == "Alice"
+    assert jane.name == "Jane"
+    assert jim.name == "Jim"
+    assert alice.id < jane.id < jim.id
+    assert await Team.filter(name="Test Team").exists()
+    assert len(team.members.related_objects) == 3
