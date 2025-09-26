@@ -975,6 +975,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
     async def from_single_queryset_or_none(
         cls,
         queryset: QuerySetSingle[MODEL],
+        prefetch: bool = True,
         *args,
         **kwargs,
     ) -> Self | None:
@@ -982,7 +983,12 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         Return a single Self from the given queryset or None if the queryset
         is empty
         """
+        if prefetch:
+            queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
         try:
-            return await cls.from_single_queryset(queryset, *args, **kwargs)
+            instance: MODEL | None = await queryset
+            if instance is None:
+                return None
+            return await cls.from_tortoise_orm(instance, *args, **kwargs)
         except DoesNotExist:
             return None

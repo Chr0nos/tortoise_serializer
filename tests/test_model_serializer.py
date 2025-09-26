@@ -12,6 +12,7 @@ from tests.models import (
     BookShelf,
     Location,
     Message,
+    Node,
     Person,
     Player,
     Team,
@@ -337,6 +338,17 @@ async def test_from_single_queryset_without_match():
     assert serializer is None
 
 
+async def test_from_single_queryset_or_none_without_instance():
+    class UserSerializer(ModelSerializer[User]):
+        id: int
+        name: str
+
+    serializer = await UserSerializer.from_single_queryset_or_none(
+        User.filter(id=1).first()
+    )
+    assert serializer is None
+
+
 async def test_from_single_queryset_exception():
     class UserSerializer(ModelSerializer[User]):
         id: int
@@ -577,3 +589,28 @@ async def test_nested_backward_fk_bulk_create_mixin_with_many_to_many():
     assert alice.id < jane.id < jim.id
     assert await Team.filter(name="Test Team").exists()
     assert len(team.members.related_objects) == 3
+
+
+async def test_multiples_layer_of_nested_backward_fk():
+    class NodeSerializer(ModelSerializer[Node]):
+        name: str
+        children: list["NodeSerializer"] = Field(default_factory=list)
+
+    serializer = NodeSerializer(
+        name="root",
+        children=[
+            {
+                "name": "child1",
+                "children": [
+                    {"name": "child1.2"},
+                    {"name": "child1.3"},
+                ],
+            },
+            {"name": "child2"},
+        ],
+    )
+    await Node.all().delete()
+    async with in_transaction():
+        node = await serializer.create_tortoise_instance()
+    assert node.name == "root"
+    assert await Node.all().count() == 5
