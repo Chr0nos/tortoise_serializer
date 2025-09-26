@@ -86,3 +86,32 @@ class Message(Model):
         encoder=lambda x: MessageMetadata.model_validate(x).model_dump_json(),
     )
     created = fields.DatetimeField(auto_now_add=True, db_index=True)
+
+
+class Player(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    team: fields.ForeignKeyNullableRelation["Team"] = fields.ForeignKeyField(
+        "models.Team",
+        on_delete=fields.CASCADE,
+        related_name="members",
+        null=True,
+        default=None,
+    )
+    lead_team: fields.ForeignKeyNullableRelation["Team"] = (
+        fields.ForeignKeyField(
+            "models.Team",
+            on_delete=fields.CASCADE,
+            related_name="leaders",
+            null=True,
+            default=None,
+        )
+    )
+
+
+class Team(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    created = fields.DatetimeField(auto_now_add=True)
+    members: fields.ReverseRelation[Player]
+    leaders: fields.ReverseRelation[Player]

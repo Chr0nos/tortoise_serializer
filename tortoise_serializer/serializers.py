@@ -9,6 +9,7 @@ from typing import (
     Any,
     Generator,
     Generic,
+    Optional,
     Self,
     Sequence,
     Type,
@@ -776,8 +777,15 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         _context: ContextType | None,
         _exclude: set[str],
     ) -> None:
-        """Creates the backward ForeignKeys for a given instance of self.get_model_class"""
+        """Creates the backward ForeignKeys for a given instance of self.get_model_class
+        we can't use bulk_create here because the `id` fields
+        (nor any db_generated fields) are set by tortoise-orm
+        so we have to create them one by one.
+        since in this context we are probably in a transaction, we can't
+        use asyncio.gather to create them in concurency
 
+        see: https://github.com/tortoise/tortoise-orm/issues/1992
+        """
         for field_name, serializers in backward_fks.items():
             if field_name in _exclude:
                 continue
@@ -815,17 +823,9 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
         if max_depth > 0:
             for field_name in common_fields.copy():
-                # Get nested serializers for this field
-                serializers = cls._get_nested_serializers_for_field(field_name)
-                if not serializers:
+                serializer_class = cls._get_field_serializer(field_name)
+                if not serializer_class:
                     continue
-
-                serializer_class = serializers[0]
-                if not issubclass(serializer_class, ModelSerializer):
-                    raise TortoiseSerializerException(
-                        f"Bad configuration for field {field_name}:"
-                        f" this must inherit from ModelSerializer ({serializer_class})"
-                    )
 
                 # Recursive call to get nested fields
                 nested_fields = serializer_class.get_model_fields(
@@ -837,6 +837,32 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
         # Add prefix to all fields
         return {f"{prefix}{field}" for field in common_fields}
+
+    @classmethod
+    def _get_field_serializer(
+        cls, field_name: str
+    ) -> Optional["ModelSerializer"]:
+        """
+        Get the serializer for a given field name.
+        If no serializer is found, return None.
+        the serializer must inherit from ModelSerializer
+        """
+        serializers = cls._get_nested_serializers_for_field(field_name)
+        if not serializers:
+            return None
+        serializer_class, *others = serializers
+        if not issubclass(serializer_class, ModelSerializer):
+            raise TortoiseSerializerException(
+                f"Bad configuration for field {field_name}:"
+                f" this must inherit from ModelSerializer ({serializer_class})"
+            )
+        if others:
+            logger.warning(
+                "Multiple nested serializers found for field, only the first one will be used",
+                field_name=field_name,
+                others=others,
+            )
+        return serializer_class
 
     @classmethod
     def _filter_nested_serializer(
@@ -949,6 +975,7 @@ class ModelSerializer(Serializer, Generic[MODEL]):
     async def from_single_queryset_or_none(
         cls,
         queryset: QuerySetSingle[MODEL],
+        prefetch: bool = True,
         *args,
         **kwargs,
     ) -> Self | None:
@@ -956,7 +983,12 @@ class ModelSerializer(Serializer, Generic[MODEL]):
         Return a single Self from the given queryset or None if the queryset
         is empty
         """
+        if prefetch:
+            queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
         try:
-            return await cls.from_single_queryset(queryset, *args, **kwargs)
+            instance: MODEL | None = await queryset
+            if instance is None:
+                return None
+            return await cls.from_tortoise_orm(instance, *args, **kwargs)
         except DoesNotExist:
             return None
