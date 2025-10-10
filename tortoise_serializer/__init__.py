@@ -8,7 +8,7 @@ from .serializers import (
 from .types import ContextType, Unset, UnsetType
 from .utils import ensure_fetched_fields
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
 __all__ = [
     "ContextType",
     "ensure_fetched_fields",
