@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "tortoise-serializer"
-version = "1.7.0"
+version = "0.0.0"
 description = "Pydantic serialization for tortoise-orm"
 authors = ["Sebastien Nicolet <snicolet95@gmail.com>"]
 license = "MIT"
@@ -23,9 +23,8 @@ pytest-cov = "^6.0.0"
 coverage = "^7.6.10"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
-
+requires = ["poetry-core", "poetry-dynamic-versioning >=1.0.0,<2.0.0"]
+build-backend = "poetry_dynamic_versioning.backend"
 
 [tool.ruff]
 target-version = "py312"
@@ -34,3 +33,13 @@ indent-width = 4
 
 [tool.pytest.ini_options]
 asyncio_default_fixture_loop_scope = "session"
+
+[tool.poetry.requires-plugins]
+poetry-dynamic-versioning = { version = ">=1.0.0,<2.0.0", extras = ["plugin"] }
+
+[tool.poetry-dynamic-versioning]
+enable = true
+
+[tool.poetry-dynamic-versioning.from-file]
+source = "tortoise_serializer/__init__.py"
+pattern = '__version__ = "(.+)"'
