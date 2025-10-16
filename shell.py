@@ -2,7 +2,7 @@ import asyncio
 from tortoise import Tortoise
 from tests.conftest import tortoise_config
 from tests.models import * #  noqa
-from tortoise_serializer import Serializer, ModelSerializer #  noqa: F401
+from tortoise_serializer import Serializer, ModelSerializer #  noqa
 
 
 TORTOISE_CONFIG = {
