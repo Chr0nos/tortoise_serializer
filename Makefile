@@ -1,7 +1,15 @@
+all: test check
+
 test:
-	poetry run pytest --asyncio-mode=auto --cov tortoise_serializer
+	uv run pytest --asyncio-mode=auto --cov tortoise_serializer
 
 clean:
 	find . -name "__pycache__" -type d -exec rm -rf {} +
 
-.PHONY: tests clean
+check:
+	uv run ruff check ./tortoise_serializer/
+
+shell:
+	uv run ipython -i shell.py
+
+.PHONY: tests clean check shell
