@@ -1,8 +1,9 @@
 import asyncio
-from tortoise import Tortoise
-from tests.models import * #  noqa
-from tortoise_serializer import Serializer, ModelSerializer #  noqa
 
+from tortoise import Tortoise
+
+from tests.models import *  # noqa
+from tortoise_serializer import ModelSerializer, Serializer  # noqa
 
 TORTOISE_CONFIG = {
     "connections": {
@@ -11,16 +12,16 @@ TORTOISE_CONFIG = {
     "app": {
         "models": {
             "models": ["tests.models"],
-            "default_connection": "default"
+            "default_connection": "default",
         }
-    }
+    },
 }
 
 
 async def connect_db():
     await Tortoise.init(
-        db_url=TORTOISE_CONFIG['connections']['default'],
-        modules={"models": TORTOISE_CONFIG['app']['models']['models']}
+        db_url=TORTOISE_CONFIG["connections"]["default"],
+        modules={"models": TORTOISE_CONFIG["app"]["models"]["models"]},
     )
     await Tortoise.generate_schemas()
 
