@@ -9,7 +9,7 @@ clean:
 check:
 	uv run ruff check ./tortoise_serializer/
 
-shell:
-	uv run ipython -i shell.py
+#shell:
+#	uv run ipython -i shell.py
 
 .PHONY: tests clean check shell
