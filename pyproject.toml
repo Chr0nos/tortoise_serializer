@@ -1,30 +1,42 @@
-[tool.poetry]
+[project]
 name = "tortoise-serializer"
-version = "0.0.0"
+dynamic = ["version"]
 description = "Pydantic serialization for tortoise-orm"
-authors = ["Sebastien Nicolet <snicolet95@gmail.com>"]
+authors = [{name="Sebastien Nicolet", email="snicolet95@gmail.com"}]
 license = "MIT"
 readme = "README.md"
+dependencies = [
+    "frozendict>=2.4.6",
+    "tortoise-orm>=0.25.1",
+    "pydantic (>=2.12.2,<3.0.0)",
+    "structlog (>=25.4.0,<26.0.0)",
+]
+requires-python = ">=3.12"
+version = "1.7.2"
 
 [tool.poetry.dependencies]
 python = "^3.12"
-pydantic = ">=2.10.0,<=2.12.0"
 frozendict = "^2.4.6"
-structlog = "^24.4.0"
 tortoise-orm = "^0.23.0 || ^0.24.0 || ^0.25.0"
 
 [tool.poetry.group.dev.dependencies]
-ipython = "^8.30.0"
 pytest = "^8.3.4"
 anyio = "^4.7.0"
-pytest-asyncio = "^0.25.0"
-ruff = "^0.8.4"
-pytest-cov = "^6.0.0"
 coverage = "^7.6.10"
 
 [build-system]
 requires = ["poetry-core", "poetry-dynamic-versioning >=1.0.0,<2.0.0"]
 build-backend = "poetry_dynamic_versioning.backend"
+
+[dependency-groups]
+dev = [
+    "coverage>=7.11.0",
+    "pytest>=8.4.2",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "pytest-cov (>=7.0.0,<8.0.0)",
+    "ruff (>=0.14.1,<0.15.0)",
+    "ipython (>=9.6.0,<10.0.0)",
+]
 
 [tool.ruff]
 target-version = "py312"
