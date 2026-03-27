@@ -5,7 +5,7 @@ from tortoise.context import TortoiseContext
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def db() -> AsyncGenerator[TortoiseContext]:
+async def db() -> AsyncGenerator[TortoiseContext, None]:
     async with tortoise_test_context(
         modules=["tests.models"],
         db_url="sqlite://:memory:",
