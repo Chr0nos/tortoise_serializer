@@ -944,9 +944,9 @@ class ModelSerializer(Serializer, Generic[MODEL]):
                          and its nested serializers are considered, be careful
                          with the resolvers needs
         any *args, *kwargs will be passed to `Serializer.from_queryset` method."""
-        assert not (
-            prefetch and select_only
-        ), "prefetch and select_only cannot be true at the same time"
+        assert not (prefetch and select_only), (
+            "prefetch and select_only cannot be true at the same time"
+        )
         if prefetch:
             queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
         elif select_only:
