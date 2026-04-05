@@ -947,10 +947,10 @@ class ModelSerializer(Serializer, Generic[MODEL]):
 
         Raises:
             ValueError: If both `prefetch` and `select_only` are True."""
-        if (prefetch and select_only):
+        if prefetch and select_only:
             raise ValueError(
-            "prefetch and select_only cannot be true at the same time"
-        )
+                "prefetch and select_only cannot be true at the same time"
+            )
         if prefetch:
             queryset = queryset.prefetch_related(*cls.get_prefetch_fields())
         elif select_only:
