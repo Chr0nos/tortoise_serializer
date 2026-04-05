@@ -243,7 +243,7 @@ async def test_from_queryset_with_both_prefetch_and_select_only():
     class PersonSerializer(ModelSerializer[Person]):
         id: int
 
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError):
         await PersonSerializer.from_queryset(
             Person.all(), prefetch=True, select_only=True
         )
