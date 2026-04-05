@@ -10,14 +10,14 @@ This project was created to address some of the limitations of `pydantic_model_c
 - Support for adding extra logic to specific serializers.
 - The ability to document fields in a way that is visible in Swagger.
 
-## Usefull readings
+## Useful readings
 - https://docs.pydantic.dev/latest/
 - https://tortoise.github.io/
 
 
 ## Installation
 ```shell
-pip add tortoise-serializer
+pip install tortoise-serializer
 ```
 
 ## Core concept
@@ -33,7 +33,6 @@ class ItemByNameSerializer(Serializer):
 
 products = await ItemByNameSerializer.from_queryset(Product.all())
 users = await ItemByNameSerializer.from_queryset(User.all())
-
 ```
 This is entirely valid.
 
@@ -86,18 +85,161 @@ async def create_user(user_serializer: MyUserCreationSerializer = Body(...)) -> 
     return await MyUserSerializer.from_tortoise_orm(user)
 ```
 
-> Note: It is currently not possible to handle ForeignKeys directly using serializers. You need to manage such logic in your views.
+> Note: It is currently not possible to handle ForeignKeys directly using the base `Serializer`. You need to manage such logic in your views, or use `ModelSerializer` instead.
 
+### Partial updates
+Use `partial_update_tortoise_instance` to apply only the fields that were explicitly set in the serializer (useful for `PATCH` endpoints). It returns `True` if any field was changed, `False` otherwise:
+
+```python
+from pydantic import Field
+from tortoise_serializer import Serializer
+
+
+class BookUpdateSerializer(Serializer):
+    title: str | None = None
+    price: float | None = None
+
+
+@router.patch("/{book_id}")
+async def update_book(book_id: int, update: BookUpdateSerializer) -> BookSerializer:
+    book = await Book.get_or_none(id=book_id)
+    if not book:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "No such book")
+    changed = update.partial_update_tortoise_instance(book)
+    if changed:
+        await book.save()
+    return await BookSerializer.from_tortoise_orm(book)
+```
+
+Use `has_been_set` to check whether a specific field was included in the payload, even when its value is `None` or an empty string:
+
+```python
+serializer = BookUpdateSerializer(title=None)
+serializer.has_been_set("title")   # True  — field was explicitly sent
+serializer.has_been_set("price")   # False — field was omitted entirely
+```
 
 ### Context
-The context in serializers is immutable.
+The context passed to serializers is immutable (stored as a `frozendict`). It is forwarded automatically to nested serializers and all resolvers.
 
 
 ### Resolvers
-Sometimes, you need to compute values or restrict access to sensitive data. This can be achieved with `resolvers` and `context`. Here's an example:
+Sometimes, you need to compute values or restrict access to sensitive data. This can be achieved with resolvers and context.
+
+#### Method-based resolvers
+Define a classmethod named `resolve_<field_name>`. It can be sync or async:
 
 ```python
-from tortoise_serializer import ContextType, Serializer, require_permission_or_unset
+from tortoise_serializer import ContextType, Serializer
+from tortoise import Model, fields
+
+
+class BookModel(Model):
+    id = fields.IntField(primary_key=True)
+    title = fields.CharField(db_index=True)
+    shelf = fields.ForeignKeyField(
+        "models.BookShelf",
+        on_delete=fields.SET_NULL,
+        null=True,
+        related_name="books",
+    )
+
+
+class BookSerializer(Serializer):
+    id: int
+    title: str
+    path: str
+    answer_to_the_question: int
+
+    @classmethod
+    async def resolve_path(cls, instance: BookModel, context: ContextType) -> str:
+        if not instance.shelf:
+            return instance.title
+        await instance.fetch_related("shelf")
+        return f'{instance.shelf.name}/{instance.title}'
+
+    @classmethod
+    def resolve_answer_to_the_question(cls, instance: BookModel, context: ContextType) -> int:
+        return 42
+
+
+serializer = await BookSerializer.from_tortoise_orm(my_book)
+assert serializer.path == "main/Serializers 101"
+assert serializer.answer_to_the_question == 42
+```
+
+All async resolvers are executed concurrently via `asyncio.TaskGroup`. Sync resolvers run sequentially.
+
+#### Decorator-based resolvers
+Use the `@resolver` decorator to bind a method to a field when the method name doesn't follow the `resolve_<field>` convention. The method must still be a `@classmethod`:
+
+```python
+from tortoise_serializer import resolver, Serializer, ContextType
+
+
+class UserSerializer(Serializer):
+    full_name: str
+
+    @resolver("full_name")
+    @classmethod
+    def compute_full_name(cls, instance, context: ContextType) -> str:
+        return f"{instance.first_name} {instance.last_name}"
+```
+
+Async resolvers work the same way:
+
+```python
+class BookSerializer(Serializer):
+    id: int
+    title: str
+    shelf_name: str | None = None
+
+    @resolver("shelf_name")
+    @classmethod
+    async def _fetch_shelf_name(cls, instance: Book, context: ContextType) -> str | None:
+        if not instance.shelf_id:
+            return None
+        await instance.fetch_related("shelf")
+        return instance.shelf.name
+```
+
+`@resolver` and `@require_condition_or_unset` can be combined. Put `@resolver` outermost, then `@require_condition_or_unset`, then `@classmethod`:
+
+```python
+from tortoise_serializer import resolver, require_condition_or_unset, Serializer, ContextType
+
+
+def is_admin(instance, context: ContextType) -> bool:
+    return context.get("user_role") == "admin"
+
+
+class BookSerializer(Serializer):
+    id: int
+    title: str
+    # capitalised and stripped title
+    display_title: str
+    # only visible to admins; silently omitted otherwise
+    internal_margin: float | None = None
+
+    @resolver("display_title")
+    @classmethod
+    def _clean_title(cls, instance: Book, context: ContextType) -> str:
+        return instance.title.title().strip()
+
+    @resolver("internal_margin")
+    @require_condition_or_unset(is_admin)
+    @classmethod
+    async def _margin(cls, instance: Book, context: ContextType) -> float:
+        return instance.cost * 1.3
+```
+
+When `is_admin` returns `False`, `internal_margin` is silently omitted. Use `response_model_exclude_unset=True` in FastAPI endpoints to keep the JSON clean.
+
+#### Conditional resolvers
+Use `require_condition_or_unset` to conditionally expose a field. When the condition returns `False`, the field is omitted (set to `Unset`) instead of raising a validation error:
+
+```python
+from tortoise_serializer import ContextType, Serializer, require_condition_or_unset
 from tortoise import Model, fields
 
 
@@ -115,11 +257,11 @@ def is_self(instance: UserModel, context: ContextType) -> bool:
 
 class UserSerializer(Serializer):
     id: int
-    # Default is set to None, but the field will be omitted.
+    # Default is set to None, but the field will be omitted when the condition is False.
     address: str | None = None
 
     @classmethod
-    @require_permission_or_unset(is_self)
+    @require_condition_or_unset(is_self)
     async def resolve_address(cls, instance: UserModel, context: ContextType) -> str:
         return instance.address
 
@@ -131,7 +273,42 @@ async def list_users(user: UserModel = Depends(...)) -> list[UserSerializer]:
 
 This ensures that the `address` field is not exposed to unauthorized users.
 
-Async resolvers are called concurrently during serializer instantiation.
+The condition checker can itself be async when used with an async resolver.
+
+### Context propagation into nested serializers
+The context is forwarded automatically to all nested serializers and their resolvers. This makes it easy to pass request-scoped data (current user, locale, permissions) down the entire serialization tree without manually threading it:
+
+```python
+from tortoise_serializer import Serializer, ContextType
+
+
+class BookSerializer(Serializer):
+    id: int
+    title: str
+    already_borrowed: bool
+
+    @classmethod
+    async def resolve_already_borrowed(
+        cls, instance: Book, context: ContextType
+    ) -> bool:
+        person = context.get("current_person")
+        if not person:
+            return False
+        return await person.borrows.filter(id=instance.id).exists()
+
+
+class PersonSerializer(Serializer):
+    id: int
+    name: str
+    borrows: list[BookSerializer]  # context is forwarded here automatically
+
+
+serializer = await PersonSerializer.from_tortoise_orm(
+    person, context={"current_person": person}
+)
+# every BookSerializer in .borrows receives the same context
+```
+
 
 ## Relations
 ### ForeignKeys & OneToOne
@@ -170,12 +347,12 @@ class ShelfSerializer(Serializer):
 
 
 # Prefetching related fields is optional but improves performance.
-serializer = ShelfSerializer.from_queryset(
+serializers = await ShelfSerializer.from_queryset(
     BookShelf.all().prefetch_related("books").order_by("name")
 )
 ```
 
-For a normal ForeignKey relationship:
+For a forward ForeignKey relationship (book → shelf):
 
 ```python
 class ShelfSerializer(Serializer):
@@ -189,105 +366,106 @@ class BookSerializer(Serializer):
     shelf: ShelfSerializer | None
 ```
 
+Reverse relations are typed as `list[NestedSerializer]`.
 
-Reverse relations are `list[Serializer]`
-
-Limitations:
-Limitations: You cannot declare a field like this:
+**Limitation:** A field cannot mix two different serializer types:
 ```python
-class SerializerA(Serializer):
-    ...
-
-
-class SerializerB(Serializer):
-    ...
-
-
+# This is NOT supported:
 class MyWrongSerializer(Serializer):
-    my_field = SerializerA | SerializerB
+    my_field: SerializerA | SerializerB
 ```
 
-but you can still use `None` like:
+But `None` is allowed:
 ```python
 class MySerializer(Serializer):
     some_relation: SerializerA | None = None
 ```
 
 ### Many2Many
-There are two ways to handle Many-to-Many relationships:
+Declare the M2M field as `list[NestedSerializer]` — the same as a reverse FK:
 
-- Use an intermediate Serializer with two ForeignKeys.
-- Use a resolver in the serializer.
-
-### Computed fields
-Serialization involves resolving fields in the following order:
-
-- Resolvers (computed fields)
-- ForeignKeys
-- Model fields
-This order allows hiding fields based on the request.
-
-Example of a computed field:
 ```python
-from pydantic import Field
-from tortoise_serializer import Serializer, ContextType
-from tortoise.queryset import QuerySet
+from tortoise import Model, fields
+from tortoise_serializer import Serializer
 
 
 class Book(Model):
     id = fields.IntField(primary_key=True)
-    title = fields.CharField(db_index=True)
-    shelf = fields.ForeignKeyField(
-        "models.BookShelf",
-        on_delete=fields.SET_NULL,
-        null=True,
-        related_name="books",
-    )
+    title = fields.CharField(max_length=200)
+
+
+class Person(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(max_length=200)
+    borrows = fields.ManyToManyField("models.Book", related_name="borrowers")
 
 
 class BookSerializer(Serializer):
     id: int
     title: str
-    path: str
-    # This description will appear in Swagger's schema.
-    answer_to_the_question: int = Field(description="The answer to the big question of life")
 
-    @classmethod
-    async def resolve_path(cls, instance: Book, context: ContextType) -> str:
-        if not instance.shelf:
-            return instance.title
-        if isinstance(instance.shelf, QuerySet):
-            await instance.fetch_related("shelf")
-        return f'{instance.shelf.name}/{instance.title}'
 
-    @classmethod
-    def resolve_answer_to_the_question(cls, instance: Book, context: ContextType) -> int:
-        return 42
+class PersonSerializer(Serializer):
+    id: int
+    name: str
+    borrows: list[BookSerializer]
 
-main_shelf = await Shelf.create(title="main")
-my_book = await Book.create(title="Serializers 101", shelf=main_shelf)
-serializer = await BookSerializer.from_tortoise_orm(my_book)
 
-assert serializer.path == "main/Serializers 101"
-assert serializer.answer_to_the_question == 42
+alice = await Person.create(name="Alice")
+await alice.borrows.add(*await Book.filter(title__in=["LOTR", "Dune"]))
 
+serializer = await PersonSerializer.from_tortoise_orm(alice)
+# serializer.borrows → [BookSerializer(id=..., title="LOTR"), BookSerializer(id=..., title="Dune")]
 ```
 
-All async resolvers will be resolved in concurency in a `asyncio.gather`, non-async ones will be resolved one after the other
+Two patterns are available for more complex cases:
+
+- Use an intermediate model with two ForeignKeys (for extra fields on the join).
+- Use a `resolve_<field>` method to apply custom filtering or ordering.
+
+### Computed fields
+Fields are resolved in the following priority order:
+
+1. Resolvers (computed fields)
+2. ForeignKeys
+3. Model fields
+
+This means a resolver can shadow or replace a model field of the same name.
+
+### Prefetching related fields
+Use `get_prefetch_fields()` to generate the list of relations to pass to `prefetch_related`:
+
+```python
+queryset = Book.all().prefetch_related(*BookSerializer.get_prefetch_fields())
+serializers = await BookSerializer.from_queryset(queryset)
+```
+
 
 ## Model Serializers
-Sometime it may be usefull or necessary to be able to create a row and it's related foreignkeys at once in one endpoint, to achieve that the `ModelSerializer` class exists
+`ModelSerializer` extends `Serializer` with the ability to create model instances and their nested relations in a single call. It is generic over the Tortoise model it targets.
 
-Models serializer can manage:
+```python
+class MySerializer(ModelSerializer[MyModel]):
+    ...
+```
+
+It supports creating:
 - [x] Foreign keys
-- [x] Backward foreign key
+- [x] Backward foreign keys
 - [x] Many2Many relations
-- [x] One to one relationship
+- [x] One-to-one relationships
 
 ### Basic Usage
 ```python
 from tortoise import Model, fields
+from tortoise.fields.relational import BackwardFKRelation
 from tortoise_serializer import ModelSerializer
+
+
+class BookShelf(Model):
+    id = fields.IntField(primary_key=True)
+    name = fields.CharField(unique=True, max_length=200)
+    books: BackwardFKRelation["Book"]
 
 
 class Book(Model):
@@ -301,37 +479,26 @@ class Book(Model):
     )
 
 
-class BookShelf(Model):
-    id = fields.IntField(primary_key=True)
-    name = fields.CharField(unique=True, max_length=200)
-    books: BackwardFKRelation[Book]
-
-
 class ShelfCreationSerializer(ModelSerializer[BookShelf]):
     name: str
 
 
 class BookCreationSerializer(ModelSerializer[Book]):
     title: str
-    # here of course it's a bit weird to create the shelves with the books but
-    # it's only for the example
     shelf: ShelfCreationSerializer
 
 
-serializer = BookCreationSerializer(title="Some Title", shelv={"name": "where examples lie"})
-example = await serializer.create_tortoise_instance()
+serializer = BookCreationSerializer(title="Some Title", shelf={"name": "where examples lie"})
+book = await serializer.create_tortoise_instance()
 
-# example will be an instance of `Book` here with it's related `shelf` realtion
-
-assert await Book.filter(name="Some Title", shelv__name="where examples lie").exists()
+assert await Book.filter(title="Some Title", shelf__name="where examples lie").exists()
 ```
 
+> It is strongly recommended to call `create_tortoise_instance` inside a `transaction` context to ensure atomicity.
+
 ### FastAPI
-Since Serializers inherit from `pydantic.BaseModel` it means you can safely use them with FastAPI without any extra effort
+Since Serializers inherit from `pydantic.BaseModel`, they work with FastAPI out of the box.
 
-Fastapi Documentation: https://fastapi.tiangolo.com/
-
-#### Example
 ```python
 from fastapi import status, Body, HTTPException
 from fastapi.routing import APIRouter
@@ -340,11 +507,10 @@ from tortoise import Model, fields
 from tortoise.transaction import in_transaction
 from tortoise_serializer import ModelSerializer
 
-# Tortoise Models
 
 class Author(Model):
-    id = models.IntegerField(primary_key=True)
-    name = models.CharField(max_length=200, unique=True)
+    id = fields.IntegerField(primary_key=True)
+    name = fields.CharField(max_length=200, unique=True)
 
 
 class Book(Model):
@@ -353,8 +519,6 @@ class Book(Model):
     pages_count = fields.IntegerField()
     author = fields.ForeignKeyField("models.Author", related_name="books")
 
-
-# Serializer for creation
 
 class AuthorCreationSerializer(ModelSerializer[Author]):
     name: str
@@ -365,18 +529,15 @@ class BookCreationSerializer(ModelSerializer[Book]):
     author: AuthorCreationSerializer
 
     async def _get_or_create_author(self) -> Author:
-        # here's an example of get or create flow using the serializers
         author = await Author.filter(name=self.author.name).get_or_none()
         if not author:
             author = await self.author.create_tortoise_instance()
         return author
 
-    async def create_tortoise_instance(self, *args,  **kwargs) -> Book:
+    async def create_tortoise_instance(self, *args, **kwargs) -> Book:
         kwargs["author"] = await self._get_or_create_author()
         return await super().create_tortoise_instance(*args, **kwargs)
 
-
-# Serializer for reading
 
 class AuthorSerializer(ModelSerializer[Author]):
     id: int
@@ -388,9 +549,8 @@ class BookSerializer(ModelSerializer[Book]):
     title: str
     author: AuthorSerializer
 
-# Views to manage the books
 
-router = APIRouter(prefix="/test")
+router = APIRouter(prefix="/books")
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
@@ -402,8 +562,7 @@ async def create_book(serializer: BookCreationSerializer = Body(...)) -> BookSer
 
 @router.get("")
 async def list_books() -> list[BookSerializer]:
-    queryset = Book.all().prefetch_related(*BookSerializer.get_prefetch_fields())
-    return await BookSerializer.from_queryset(queryset)
+    return await BookSerializer.from_queryset(Book.all(), prefetch=True)
 
 
 @router.get("/{book_id}")
@@ -423,37 +582,73 @@ async def delete_book(book_id: int) -> None:
     await Book.filter(id=book_id).delete()
 
 
-@router.patch("{book_id}")
+@router.patch("/{book_id}")
 async def update_book(book_id: int, update: BookCreationSerializer) -> BookSerializer:
     book = await Book.get_or_none(id=book_id)
     if not book:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "No such book")
     book.author = await update._get_or_create_author()
     update.partial_update_tortoise_instance(book)
-    await book.save().
+    await book.save()
     return await BookSerializer.from_tortoise_orm(book)
 ```
 
-### Optimizing Database Queries with Field Selection
+### Optimizing Database Queries
 
-Starting from `tortoise-orm` version 0.25.0, you can optimize your database queries by only fetching the fields that will be serialized. This feature helps reduce database load and improve performance by avoiding unnecessary field fetches.
-
-Here's how to use it:
+#### Prefetching
+`ModelSerializer.from_queryset` accepts a `prefetch=True` parameter to automatically prefetch all relations declared in the serializer:
 
 ```python
-class LocationSerializer[ModelSerializer[Location]]:
-    id: str
-    name: str
-
-
-class PersonSerializer(ModelSerializer[Person]):
-    id: int
-    name: str
-    location: LocationSerializer
-
-
-persons = await PersonSerializer.from_queryset(
-    Person.all().only(*PersonSerializer.get_only_fetch_fields())
-)
-
+books = await BookSerializer.from_queryset(Book.all(), prefetch=True)
 ```
+
+This is equivalent to manually calling `.prefetch_related(*BookSerializer.get_prefetch_fields())`.
+
+#### Field selection
+Starting from `tortoise-orm` 0.25.0, you can limit fetched columns to only those needed by the serializer using `select_only=True`:
+
+```python
+books = await BookSerializer.from_queryset(Book.all(), select_only=True)
+```
+
+Or manually via `get_only_fetch_fields()`:
+
+```python
+books = await BookSerializer.from_queryset(
+    Book.all().only(*BookSerializer.get_only_fetch_fields())
+)
+```
+
+> `prefetch=True` and `select_only=True` are mutually exclusive.
+
+#### Single instance helpers
+
+`ModelSerializer` provides two convenience methods for fetching a single instance:
+
+```python
+# Raises DoesNotExist if not found
+book = await BookSerializer.from_single_queryset(Book.filter(id=book_id).get())
+
+# Returns None if not found
+book = await BookSerializer.from_single_queryset_or_none(Book.filter(id=book_id).get_or_none())
+```
+
+Both automatically prefetch related fields by default (`prefetch=True`).
+
+
+## Mixins
+
+### BackwardFKBulkCreateMixin
+When creating a parent record with many backward FK children, the default implementation creates them one by one (required by Tortoise ORM to obtain generated PKs). If you don't need the child PKs after creation, `BackwardFKBulkCreateMixin` uses `bulk_create` for better performance:
+
+```python
+from tortoise_serializer import ModelSerializer
+from tortoise_serializer.mixins import BackwardFKBulkCreateMixin
+
+
+class ShelfCreationSerializer(BackwardFKBulkCreateMixin, ModelSerializer[BookShelf]):
+    name: str
+    books: list[BookCreationSerializer] = []
+```
+
+> **Warning:** Instances created via `bulk_create` will not have their database-generated fields (e.g. `id`) populated after creation. Re-query the database if you need them.
