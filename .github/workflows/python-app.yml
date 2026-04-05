@@ -25,7 +25,7 @@ jobs:
       run: uv sync
 
     - name: Check norm
-      run: uv run ruff check tortoise_serializer
+      run: uv run ruff format --check tortoise_serializer --diff
 
     - name: Test with pytest
       run: uv run pytest --cov tortoise_serializer --cov-report=xml
